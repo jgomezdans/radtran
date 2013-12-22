@@ -21,7 +21,10 @@ def gl(angle, arch='s'):
   elif arch=='e': # erectophile
     gl = 3./2*(np.sin(angle))**2
   elif arch=='s': # spherical
-    gl = 1.
+    if isinstance(angle, np.ndarray):
+      gl = np.ones(np.shape(angle))
+    else:
+      gl = 1.
   elif arch=='m': # plagiophile
     gl = 15./8*(np.sin(2*angle))**2 
   elif arch=='x': # extremophile
@@ -41,6 +44,27 @@ def G(view, arch='s'):
   G = quadrature(g, 0., np.pi/2., args=(view, arch)) # integrate leaf angles between 0 to pi/2.
   return G
 
+def plotgl():
+  '''A function to plot the LAD distribution for each 
+  archetype.
+  Output: plots of gl functions
+  '''
+  types = ['p','e','s','m','x']
+  colors = ['g','b','+r','xy','--c']
+  views = np.linspace(0., np.pi/2, 100)
+  gf = np.zeros_like(views)
+  for i,c in zip(types,colors):
+    gf = gl(views, i)
+    #pdb.set_trace()
+    '''for j,v in enumerate(views):
+      Gf[j] = G(v, i)[0]'''
+    plt.plot(views*180./np.pi, gf, c, label=i)
+  plt.title('Leaf Angle Distribution')
+  plt.xlabel('Zenith Angle')
+  plt.ylabel('gl')
+  plt.legend()
+  plt.show()
+
 def plotG():
   '''A function to plot the integrated G functions for 
   every LAD and every view angle. 
@@ -51,12 +75,16 @@ def plotG():
   views = np.linspace(0., np.pi/2, 100)
   Gf = np.zeros_like(views)
   for i,c in zip(types,colors):
-    #pdb.set_trace()
     for j,v in enumerate(views):
       Gf[j] = G(v, i)[0]
     plt.plot(views*180./np.pi, Gf, c, label=i)
+    #pdb.set_trace()
+  plt.title('Leaf projection function (G)')
+  plt.xlabel('Zenith Angle')
+  plt.ylabel('G')
   plt.legend()
   plt.show()
 
 #pdb.set_trace()
+plotgl()
 plotG()
