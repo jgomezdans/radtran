@@ -33,6 +33,21 @@ def gl(angle, arch='s'):
     raise Exception('IncorrectArchetype')
   return gl
 
+def psi(angle, view):
+  '''The kernel basel on the Myneni III.13.
+  Input: angle - the leaf zenith angel in radians,
+  view - the view zenith angle in radians.
+  Output: The kernel.
+  '''
+  temp = 1./np.tan(angle)/np.tan(view)
+  ctns = np.abs(temp)
+  phit = 1./np.cos(-temp)
+  #pdb.set_trace()
+  psiv = np.where(ctns>1., np.abs(np.cos(view)*np.cos(angle)),\
+      np.cos(angle)*np.cos(view)*(2.*phit/np.pi - 1.) + 2./np.pi*\
+      np.sqrt(1. - np.cos(angle)**2)*np.sqrt(1. - np.cos(view)**2))
+  return psiv
+
 def G(view, arch='s'):
   '''The Geometry factor for a specific direction.
   Input: view - the view zenith angle in radians, 
@@ -40,7 +55,7 @@ def G(view, arch='s'):
   Output: The integral of the Geometry function.
   '''
   g = lambda angle, view, arch: 1./(2.*np.pi) * gl(angle, arch)\
-      *np.abs(np.cos(angle-view)) # the G function as defined in Liang p.78.
+      *psi(angle,view)#np.abs(np.cos(angle-view)) # the G function as defined in Liang p.78.
   G = quadrature(g, 0., np.pi/2., args=(view, arch)) # integrate leaf angles between 0 to pi/2.
   return G
 
