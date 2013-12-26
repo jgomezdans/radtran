@@ -5,58 +5,71 @@
 # Here are the basic functions used to describe the canopy structure.
 import numpy as np
 import scipy as sc
-from scipy.integrate import quadrature
+from scipy.integrate import quad
 import matplotlib.pylab as plt
+import warnings
 import pdb
 
 def gl(angle, arch='s'):
-  '''The leaf normal angle distribution in radians. 
+  '''The leaf normal angle distribution in radians.
+  The distributions are based on Myneni III.21 - .23 for 
+  planophile, erectophile and plagiophile which itself is
+  based on de Wit 1965 and Bunnik 1978. 
+  The rest are according to Bunnik p.35 and Ross 1981 p.117. 
+  It seems like the the formulas in Liang 2005 p.78 are
+  incorrect. They differ by the reciprocal with those in 
+  Bunnik 1978 and others.
   Input: angle - leaf normal angle in radians,
     arch - archetype ie. 'p'-planophile, 'e'-erectophile, 
-    's'-spherical, 'm'-plagiophile, 'x'-extremophile
+    's'-spherical/random, 'm'-plagiophile, 'x'-extremophile
   Output: g value at angle
   '''
   if arch=='p': # planophile
-    gl = 3.*(np.cos(angle))**2
+    gl = 2./np.pi*(1. + np.cos(2.*angle))
   elif arch=='e': # erectophile
-    gl = 3./2*(np.sin(angle))**2
+    gl = 2./np.pi*(1. - np.cos(2.*angle))
   elif arch=='s': # spherical
-    if isinstance(angle, np.ndarray):
-      gl = np.ones(np.shape(angle))
-    else:
-      gl = 1.
+    gl = np.sin(angle)
   elif arch=='m': # plagiophile
-    gl = 15./8*(np.sin(2*angle))**2 
+    gl = 2./np.pi*(1. - np.cos(4.*angle))
   elif arch=='x': # extremophile
-    gl = 15./7*(np.cos(2*angle))**2
+    gl = 2./np.pi*(1. + np.cos(4.*angle))
+  elif arch=='u': # uniform
+    if isinstance(angle, np.ndarray):
+      gl =  np.ones(np.shape(angle))*2./np.pi
+    else:
+      gl = 2./np.pi
   else:
     raise Exception('IncorrectArchetype')
   return gl
 
 def psi(angle, view):
-  '''The kernel basel on the Myneni III.13.
+  '''The kernel which replaces the azimuth dependence
+  of the double integral based on the Myneni III.13.
   Input: angle - the leaf zenith angel in radians,
   view - the view zenith angle in radians.
   Output: The kernel.
   '''
-  temp = 1./np.tan(angle)/np.tan(view)
-  ctns = np.abs(temp)
-  phit = 1./np.cos(-temp)
-  #pdb.set_trace()
+  with warnings.catch_warnings(): # the will only work in single thread app
+    warnings.simplefilter("ignore")
+    temp = 1./np.tan(angle)/np.tan(view)
+    ctns = np.abs(temp) # value used to check for inf below so ignore warning
+    phit = np.arccos(-temp)
   psiv = np.where(ctns>1., np.abs(np.cos(view)*np.cos(angle)),\
       np.cos(angle)*np.cos(view)*(2.*phit/np.pi - 1.) + 2./np.pi*\
-      np.sqrt(1. - np.cos(angle)**2)*np.sqrt(1. - np.cos(view)**2))
+      np.sqrt(1. - np.cos(angle)**2)*np.sqrt(1. - np.cos(view)**2)*np.sin(phit))
   return psiv
 
 def G(view, arch='s'):
-  '''The Geometry factor for a specific direction.
-  Input: view - the view zenith angle in radians, 
+  '''The Geometry factor for a specific view or solar
+  direction based on Myneni III.16.
+  Input: view - the view or solar zenith angle in radians, 
     arch - archetype, see gl function for description of each.
   Output: The integral of the Geometry function.
   '''
-  g = lambda angle, view, arch: 1./(2.*np.pi) * gl(angle, arch)\
-      *psi(angle,view)#np.abs(np.cos(angle-view)) # the G function as defined in Liang p.78.
-  G = quadrature(g, 0., np.pi/2., args=(view, arch)) # integrate leaf angles between 0 to pi/2.
+  g = lambda angle, view, arch: gl(angle, arch)\
+      *psi(angle,view) # the G function as defined in Liang p.78.
+  G = quad(g, 0., np.pi/2., args=(view, arch)) # integrate leaf angles between 0 to pi/2.
   return G
 
 def plotgl():
@@ -64,8 +77,8 @@ def plotgl():
   archetype.
   Output: plots of gl functions
   '''
-  types = ['p','e','s','m','x']
-  colors = ['g','b','+r','xy','--c']
+  types = ['p','e','s','m','x','u']
+  colors = ['g','b','+r','xy','--c','p']
   views = np.linspace(0., np.pi/2, 100)
   gf = np.zeros_like(views)
   for i,c in zip(types,colors):
@@ -85,9 +98,9 @@ def plotG():
   every LAD and every view angle. 
   Output: plots of the G functions.
   '''
-  types = ['p','e','s','m','x']
-  colors = ['g','b','+r','xy','--c']
-  views = np.linspace(0., np.pi/2, 100)
+  types = ['p','e','s','m','x','u']
+  colors = ['g','b','+r','xy','--c','p']
+  views = np.linspace(0., np.pi/2., 100)
   Gf = np.zeros_like(views)
   for i,c in zip(types,colors):
     for j,v in enumerate(views):
