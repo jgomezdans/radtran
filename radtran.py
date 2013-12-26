@@ -68,7 +68,7 @@ def G(view, arch='s'):
   Output: The integral of the Geometry function.
   '''
   g = lambda angle, view, arch: gl(angle, arch)\
-      *psi(angle,view) # the G function as defined in Liang p.78.
+      *psi(angle,view) # the G function as defined in Myneni III.16.
   G = quad(g, 0., np.pi/2., args=(view, arch)) # integrate leaf angles between 0 to pi/2.
   return G
 
