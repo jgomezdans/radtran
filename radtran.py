@@ -21,7 +21,8 @@ def gl(angle, arch='s'):
   Bunnik 1978 and others.
   Input: angle - leaf normal angle in radians,
     arch - archetype ie. 'p'-planophile, 'e'-erectophile, 
-    's'-spherical/random, 'm'-plagiophile, 'x'-extremophile
+    's'-spherical/random, 'm'-plagiophile, 'x'-extremophile,
+    'u'-uniform.
   Output: g value at angle
   '''
   if arch=='p': # planophile
@@ -52,7 +53,7 @@ def psi(angle, view):
   '''
   with warnings.catch_warnings(): # the will only work in single thread app
     warnings.simplefilter("ignore")
-    temp = 1./np.tan(angle)/np.tan(view)
+    temp = 1./np.tan(angle)/np.tan(view) # inf at angle = 0.
     ctns = np.abs(temp) # value used to check for inf below so ignore warning
     phit = np.arccos(-temp)
   psiv = np.where(ctns>1., np.abs(np.cos(view)*np.cos(angle)),\
@@ -65,12 +66,92 @@ def G(view, arch='s'):
   direction based on Myneni III.16.
   Input: view - the view or solar zenith angle in radians, 
     arch - archetype, see gl function for description of each.
-  Output: The integral of the Geometry function.
+  Output: The integral of the Geometry function (G).
   '''
+  #pdb.set_trace()
   g = lambda angle, view, arch: gl(angle, arch)\
       *psi(angle,view) # the G function as defined in Myneni III.16.
-  G = quad(g, 0., np.pi/2., args=(view, arch)) # integrate leaf angles between 0 to pi/2.
+  if isinstance(view, np.ndarray):
+    G = np.zeros_like(view)
+    for j,v in enumerate(view):
+      G[j] = quad(g, 0., np.pi/2, args=(v, arch))[0]
+  else:
+    G = quad(g, 0., np.pi/2., args=(view, arch))[0] # integrate leaf angles between 0 to pi/2.
   return G
+
+def K(view, arch='s'):
+  '''The Extinction Coefficient for direct beam radiation
+  based on Myneni IV.7.
+  Input: view - the view or solar zenith angle in radians,
+    arch - archetype, see gl function for description of each.
+  Output: The Extinction coefficient (K)
+  '''
+  return -G(view, arch)/np.cos(view)
+
+def P0(view, arch='s', L=5., N=10., Disp='pois'):
+  '''The Gap Probability or Zero Term based on Myneni III.33-
+  III.35. Simply the fraction of unit horisontal area at 
+  depth L that is sunlit. The 3 distributions are as follows:
+  Regular (Pos. Binomial), Random (Poisson) and Clumped 
+  (Neg. Binomial).
+  Input: view - the view or solar zenith angle in radians,
+    arch - archetype, see gl function for description of each,
+    L - total LAI or depth, N - Number of layers, Disp - 
+    Distribution see above ('pb', 'pois', 'nb').
+  Output: The gap probability (P0)
+  '''
+  if Disp == 'pois':
+    if isinstance(L, np.ndarray):
+      p = np.exp(np.outer(K(view, arch), L))
+    else:
+      p = np.exp(K(view, arch)*L)
+  elif Disp == 'pb':
+    if isinstance(L, np.ndarray):
+      p = (1. + np.outer(K(view, arch), L/N))**N
+    else:
+      p = (1. + K(view, arch)*L/N)**N
+  elif Disp == 'nb':
+    if isinstance(L, np.ndarray):
+      p = (1. - np.outer(K(view, arch), L/N))**-N
+    else:
+      p = (1. - K(view, arch)*L/N)**-N
+  else:
+    raise Exception('IncorrectDistrType')
+  return p
+
+def f(view, angle=0., sun=0., arch='s', refl=0.2, trans=0.1):
+  '''The Leaf Scattering Transfer Function based on
+  Myneni V.9. and Shultis (16) isotropic leaf
+  scattering assumption. This is leaf single-scattering
+  albedo in a particular direction per steridian.
+  This assumes a bi-lambertian scattering
+  model. Modifications to this model will be made using
+  a leaf reflectance model such a PROSPECT. At the moment 
+  this function is a placeholder for a more elaborate
+  model.
+  Input: view - the view or solar zenith angle, angle -
+    leaf normal zenith angle, sun - the solar zenith angle,
+    arch - archetype, see gl function for description of each,
+    refl - fraction reflected, trans - fraction transmitted.
+  Output: Leaf phase function value.
+  '''
+  return (refl + trans)/4./np.pi
+
+def Gamma(view, angle=0., sun=0., arch='s', refl=0.2, trans=0.1):
+  '''The Area Scattering Phase Function based on Myneni V.18
+  and Shultis (17) isotropic scattering assumption. A more 
+  elaborate function will be needed see V.18. This is the 
+  phase function of the scattering in a particular direction
+  based also on the amount of interception in the direction.
+  Input: view - view or solar zenith angle, angle - leaf normal
+    zenith angle, sun - the solar zenith angle, arch - archetype, 
+    see gl function for description, refl - fraction reflected,
+    trans - fraction transmitted.
+  Output: Area Scattering Phase function value.
+  '''
+  return G(view, arch)*f(view)*np.pi
+
+#def P(
 
 def plotgl():
   '''A function to plot the LAD distribution for each 
@@ -84,8 +165,6 @@ def plotgl():
   for i,c in zip(types,colors):
     gf = gl(views, i)
     #pdb.set_trace()
-    '''for j,v in enumerate(views):
-      Gf[j] = G(v, i)[0]'''
     plt.plot(views*180./np.pi, gf, c, label=i)
   plt.title('Leaf Angle Distribution')
   plt.xlabel('Zenith Angle')
@@ -101,10 +180,8 @@ def plotG():
   types = ['p','e','s','m','x','u']
   colors = ['g','b','+r','xy','--c','p']
   views = np.linspace(0., np.pi/2., 100)
-  Gf = np.zeros_like(views)
   for i,c in zip(types,colors):
-    for j,v in enumerate(views):
-      Gf[j] = G(v, i)[0]
+    Gf = G(views, i)
     plt.plot(views*180./np.pi, Gf, c, label=i)
     #pdb.set_trace()
   plt.title('Leaf projection function (G)')
@@ -114,6 +191,6 @@ def plotG():
   plt.show()
 
 #pdb.set_trace()
-plotgl()
-plotG()
+#plotgl()
+#plotG()
 
