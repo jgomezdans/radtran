@@ -7,7 +7,7 @@ from scipy.integrate import quad
 
 import matplotlib.pyplot as plt
 
-def kuusk_lad ( theta_l, epsilon, theta_m ):
+def kuusk_lad ( theta_l, epsilon=0.001, theta_m=np.pi/2. ):
     """Kuusk leaf area distribution (LAD) function, introduced by
     Kuusk (1994, 1995, 1995). The distribution for zenith angle `theta_l` is
     controlled by two parameters, `epsilon` and `theta_m`. The former 
@@ -47,7 +47,7 @@ def kuusk_lad ( theta_l, epsilon, theta_m ):
     
     gl = b/np.sqrt(1-epsilon*epsilon*np.cos(theta_l - theta_m)**2)
     return gl
-def elliptical_lad ( theta_l, ala=None, chi=None, rotated=False ):
+def elliptical_lad ( theta_l, ala=np.pi/4., chi=None, rotated=False ):
     """One parameter ellipsoidal leaf area distribution (LAD) based on
     Campbell (1990) (also with extensions from Thomas & Winner (2000))
     This distribution considers leaves as small surface elements distributed
@@ -189,7 +189,7 @@ def test_kuusk():
     plt.plot ( np.rad2deg (s), kuusk_lad ( s, 0.9, 0 ), label="Plano")
     plt.plot ( np.rad2deg (s), kuusk_lad ( s, 0.9, np.pi/2 ), label="Erecto")
     plt.plot ( np.rad2deg (s), kuusk_lad ( s, 0.9, np.pi/4 ), label="Plagio")
-
+    plt.legend()
     plt.title( "Kuusk")
     plt.ylabel (r'$g_{l}(\theta_{l})$' )
     plt.xlabel(r'$\theta_{l}\;[^{\circ}]$')
@@ -209,4 +209,6 @@ def test_all ():
     test_big_G()
     pdf.savefig()
     plt.close()
-    pdf.close()    
+    pdf.close()   
+
+

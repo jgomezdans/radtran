@@ -8,9 +8,10 @@ import scipy as sc
 from scipy.integrate import quad
 import matplotlib.pylab as plt
 import warnings
+import leaf_angle_distributions as lad
 import pdb
 
-def gl(angle, arch='s'):
+def gl(angle, arch='s', par=None):
   '''The leaf normal angle distribution in radians.
   The distributions are based on Myneni III.21 - .23 for 
   planophile, erectophile and plagiophile which itself is
@@ -19,10 +20,14 @@ def gl(angle, arch='s'):
   It seems like the the formulas in Liang 2005 p.78 are
   incorrect. They differ by the reciprocal with those in 
   Bunnik 1978 and others.
+  Added additional distributions provided by J. Gomez-
+  Dans. These are: Kuusk (1995) and Campbell (1990)
+  distributions. See the lad module for details.
   Input: angle - leaf normal angle in radians,
     arch - archetype ie. 'p'-planophile, 'e'-erectophile, 
     's'-spherical/random, 'm'-plagiophile, 'x'-extremophile,
-    'u'-uniform.
+    'u'-uniform, 'k'-kuusk, 'b'-campbell, par - tuple of
+    parameters for the kuusk and campbell distributions.
   Output: g value at angle
   '''
   if arch=='p': # planophile
@@ -40,6 +45,16 @@ def gl(angle, arch='s'):
       gl =  np.ones(np.shape(angle))*2./np.pi
     else:
       gl = 2./np.pi
+  elif arch=='k': # kuusk
+    if type(par)==tuple:
+      gl = lad.kuusk_lad(angle,par[0],par[1])
+    else:
+      gl = lad.kuusk_lad(angle)
+  elif arch=='b': # campbell
+    if type(par)==tuple:
+      gl = lad.elliptical_lad(angle,par[0],par[1])
+    else:
+      gl = lad.elliptical_lad(angle)
   else:
     raise Exception('IncorrectArchetype')
   return gl
@@ -63,7 +78,9 @@ def psi(angle, view):
 
 def G(view, arch='s'):
   '''The Geometry factor for a specific view or solar
-  direction based on Myneni III.16.
+  direction based on Myneni III.16. The projection of 1 unit 
+  area of leaves within a unit volume onto the plane perpen-
+  dicular to the view or solar direction.
   Input: view - the view or solar zenith angle in radians, 
     arch - archetype, see gl function for description of each.
   Output: The integral of the Geometry function (G).
@@ -74,7 +91,7 @@ def G(view, arch='s'):
   if isinstance(view, np.ndarray):
     G = np.zeros_like(view)
     for j,v in enumerate(view):
-      G[j] = quad(g, 0., np.pi/2, args=(v, arch))[0]
+      G[j] = quad(g, 0., np.pi/2., args=(v, arch))[0]
   else:
     G = quad(g, 0., np.pi/2., args=(view, arch))[0] # integrate leaf angles between 0 to pi/2.
   return G
@@ -149,7 +166,11 @@ def Gamma(view, angle=0., sun=0., arch='s', refl=0.2, trans=0.1):
     trans - fraction transmitted.
   Output: Area Scattering Phase function value.
   '''
-  return G(view, arch)*f(view)*np.pi
+  B = view - sun
+  gam = 4.*np.pi/(refl + trans)*f(view, refl=refl, trans=trans)\
+      /3./np.pi*(np.sin(B) - B*np.cos(B)) + trans/3.*np.cos(B)
+  
+  return gam 
 
 #def P(
 
@@ -158,8 +179,8 @@ def plotgl():
   archetype.
   Output: plots of gl functions
   '''
-  types = ['p','e','s','m','x','u']
-  colors = ['g','b','+r','xy','--c','p']
+  types = ['p','e','s','m','x','u','k','b']
+  colors = ['g','b','+r','xy','--c','p','k','y']
   views = np.linspace(0., np.pi/2, 100)
   gf = np.zeros_like(views)
   for i,c in zip(types,colors):
@@ -177,8 +198,8 @@ def plotG():
   every LAD and every view angle. 
   Output: plots of the G functions.
   '''
-  types = ['p','e','s','m','x','u']
-  colors = ['g','b','+r','xy','--c','p']
+  types = ['p','e','s','m','x','u','k','b']
+  colors = ['g','b','+r','xy','--c','p','k','y']
   views = np.linspace(0., np.pi/2., 100)
   for i,c in zip(types,colors):
     Gf = G(views, i)
@@ -190,7 +211,29 @@ def plotG():
   plt.legend()
   plt.show()
 
+def plotGamma():
+  '''A function that plots the Area Scattering Phase 
+  function various values of leaf scattering albedo.
+  Uncomment the first part of Gamma function.
+  Output: plots of the Gamma function
+  '''
+  tr_rf= np.arange(0.,.6,0.1) # single scattering albedos
+  views = np.linspace(np.pi, 0., 100)
+  xcos = np.linspace(-1., 1., 100)
+  for trans in tr_rf:
+    refl = 1. - trans
+    gam = Gamma(views, refl=refl, trans=trans)
+    plt.plot(xcos, gam, label=str(trans))
+    #pdb.set_trace()
+  plt.title('Areas Scattering Phase Function (Gamma)')
+  plt.xlabel('Cos(Phase Angle)')
+  plt.ylabel(r'$\Gamma$/albedo')
+  plt.legend(title='trans./albedo')
+  plt.show()
+
+  
+
 #pdb.set_trace()
 #plotgl()
 #plotG()
-
+plotGamma()
