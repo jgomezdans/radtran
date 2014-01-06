@@ -176,6 +176,7 @@ def H(view, angle):
         phit = np.arccos(cotcot[i])
         h[i] = 1./np.pi * (mu*m*phit + np.sqrt(1.-mu**2.)*\
             np.sqrt(1.-m**2.)*np.sin(phit))
+    h = np.where(h<0.,0.,-h)
   else:
     if cotcot > 1.:
       h = mu*mul
@@ -185,6 +186,8 @@ def H(view, angle):
       phit = np.arccos(cotcot)
       h = 1./np.pi * (mu*mul*phit + np.sqrt(1.-mu**2.)*\
           np.sqrt(1.-mul**2.)*np.sin(phit))
+    if h < 0.:
+      h = -h
   return h
 
 def Big_psi(view,sun,leaf,trans_refl):
@@ -204,25 +207,32 @@ def Big_psi(view,sun,leaf,trans_refl):
     raise Exception('IncorrectRTtype')
   return B_psi
 
-def Gamma(view, angle=0., sun=0., arch='s', refl=0.2, trans=0.1):
+def Gamma(view=0., sun=0., arch='s', refl=0.2, trans=0.1):
   '''The Area Scattering Phase Function based on Myneni V.18
   and Shultis (17) isotropic scattering assumption. A more 
   elaborate function will be needed see V.18. This is the 
   phase function of the scattering in a particular direction
   based also on the amount of interception in the direction.
-  Input: view - view or solar zenith angle, angle - leaf normal
-    zenith angle, sun - the solar zenith angle, arch - archetype, 
-    see gl function for description, refl - fraction reflected,
-    trans - fraction transmitted.
+  Input: view - view zenith angle, sun - the solar zenith angle, 
+    arch - archetype, see gl function for description, 
+    refl - fraction reflected, trans - fraction transmitted.
   Output: Area Scattering Phase function value.
   '''
-  B = view - sun
+  '''B = view - sun # uncomment these lines to run test plot
   gam = 4.*np.pi/(refl + trans)*f(view, refl=refl, trans=trans)\
       /3./np.pi*(np.sin(B) - B*np.cos(B)) + trans/3.*np.cos(B) # Myneni V.15
-   
+  '''
+  func = lambda leaf, view, sun, arch, refl, trans: gl(leaf, arch)\
+      *(refl*Big_psi(view,sun,leaf,'r') + (trans*Big_psi(view,sun,leaf,'t')))
+      # the integral as defined in Myneni V.18.
+  if isinstance(sun, np.ndarray):
+    gam = np.zeros_like(sun)
+    for j,s in enumerate(sun):
+      gam[j] = quad(func, 0., np.pi/2., args=(view,s,arch,refl,trans))[0]
+  else:
+    gam = quad(func, 0., np.pi/2., args=(view,sun,arch,refl,trans))[0] 
+    # integrate leaf angles between 0 to pi/2.  
   return gam 
-
-#def P(
 
 def plotgl():
   '''A function to plot the LAD distribution for each 
@@ -268,11 +278,11 @@ def plotGamma():
   Output: plots of the Gamma function
   '''
   tr_rf= np.arange(0.,.6,0.1) # single scattering albedos
-  views = np.linspace(np.pi, 0., 100)
-  xcos = np.linspace(-1., 1., 100)
+  angles = np.linspace(np.pi, 0., 20)
+  xcos = np.linspace(-1., 1., 20)
   for trans in tr_rf:
     refl = 1. - trans
-    gam = Gamma(views, refl=refl, trans=trans)
+    gam = Gamma(sun=angles, refl=refl, trans=trans, arch='s')
     plt.plot(xcos, gam, label=str(trans))
     #pdb.set_trace()
   plt.title('Areas Scattering Phase Function (Gamma)')
@@ -293,6 +303,9 @@ def plotH():
     for j in range(len(y)):
       h[i,j] = H(xx[i,j], yy[i,j])
   #pdb.set_trace()
+  np.savetxt('view_sun.csv', xx, delimiter=',')
+  np.savetxt('leaf.csv', yy, delimiter=',')
+  np.savetxt('H_values.csv', h, delimiter=',')
   plt.pcolormesh(xx, yy, h)
   plt.axis([xx.max(),xx.min(),yy.max(),yy.min()])
   plt.title('H Function Values')
@@ -354,5 +367,5 @@ def plotBpsi():
 #plotgl()
 #plotG()
 #plotGamma()
-#plotH()
-plotBpsi()
+plotH()
+#plotBpsi()
