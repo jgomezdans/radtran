@@ -21,58 +21,69 @@ Stages to the script are:
 
 import numpy as np
 import matplotlib.pylab as plt
-import scipy as sc
 import pdb
 
 theta = np.loadtxt('view_sun.csv', delimiter=',')
 theta_l = np.loadtxt('leaf.csv', delimiter=',')
 H = np.loadtxt('H_values.csv', delimiter=',')
-'''
-x = []
-y = []
-zeros = np.where(H<0.001,0,1)
-for i in np.arange(0,np.shape(theta)[1]-1):
-  for j in np.arange(0,np.shape(theta)[0]-1):
-    ytest = theta[i,j] - np.pi/2.
-    if H[i,j] < 0.001 and theta_l[i,j] >= ytest and theta_l[i,j] < np.pi/2.:
-      x.append(theta[i,j])
-      y.append(theta_l[i,j])
-func = lambda a, b, c, x: a / (x + b) + c
-a = -2.05187851
-b = -0.73015463
-c = 2.41228578
-guess = (a,b,c)
-drivers = (y, x)
+hyperbola = lambda a, b, c , x: a/(b+x)+c
 
-def obj_func(guess, drivers):
-  y = drivers[0]
-  ypred = func(guess[0],guess[1],guess[2],drivers[1])
-  mismatch = y - ypred
-  rmse = (np.sum(mismatch**2)/len(y))**0.5
-  return rmse
+def remove_hips(paras, theta, theta_l, H):
+  '''A function to remove the hips of the figure.
+  The parameters for the hyperbole that defines the
+  hips needs to be defined seperately.
+  Input: paras, theta, theta_l, H.
+  Output: H without hips set to zero.
+  '''
+  for i, x  in enumerate(theta[0]):
+    for j, y in enumerate(theta_l.T[0]):
+      a = paras[0]
+      b = paras[1]
+      c = paras[2]
+      if (y > hyperbola(a[0],b[0],c[0],x) and x < np.pi/2.) or\
+          (y < hyperbola(a[1],b[1],c[1],x) and x > np.pi/2.):
+        H[j,i] = 0.
+  return H
 
-print a, b, c
-#opt_guess = sc.optimize.fmin_powell(obj_func, guess, args=[drivers])
-#print opt_guess
-xtest = np.linspace(-np.pi,np.pi,250)
-ytest = func(guess[0],guess[1],guess[2],xtest)
-plt.pcolormesh(theta, theta_l, zeros)
-plt.plot(x,y,'xk')
-plt.plot(xtest,ytest,'pk')
-plt.axis([theta.max(),theta.min(),theta_l.max(),theta_l.min()])
-plt.show()
-'''
-f = lambda a, b, c , x: a/(b+x)+c
-for i, x  in enumerate(theta[0]):
-  for j, y in enumerate(theta_l.T[0]):
-    a = (-2.05199487, -2.05187851)
-    b = (-2.41147172, -0.73015463)
-    c = (0.72926237, 2.41228578)
-    if y < f(a[0],b[0],c[0],x) and y > c[0]:
-      H[i,j] = 0.
+def remove_lips(paras, theta, theta_l, H):
+  '''A function to remove the lips on either side of the tummy.
+  The function will be extended to interpolate values.
+  Input: theta, theta_l, H, paras 
+  Output: H without lips set at 1.1
+  '''
+  for i, x  in enumerate(theta[0]):
+    for j, y in enumerate(theta_l.T[0]):
+      if x < np.pi/2.:
+        ylimit = -x + np.pi/2.
+      else:
+        ylimit = -x + np.pi*3./2.
+      a = paras[0]
+      b = paras[1]
+      c = paras[2]
+      if (y < hyperbola(a[0],b[0],c[0],x) and y >= ylimit and\
+          x < np.pi/2.) or\
+          (y > hyperbola(a[1],b[1],c[1],x) and y <= ylimit and\
+          x > np.pi/2.):
+        #pdb.set_trace()
+        H[j,i] = 1.1 #np.nan
+  #pdb.set_trace()
+  return H
+
+def interp_lips(theta, theta_l, H):
+  '''A function that interpolates values for where the lips
+  were. It needs H to have lip values at 1.1.
+  Input: theta, theta_l, H
+  Output: H interpolated
+  '''
+  
+  return
+paras1 = ((-2.05199487, -2.05187851),(-2.41147172, -0.73015463),\
+    (0.72926237, 2.41228578)) # right and left paras
+H  = remove_hips(paras1, theta, theta_l, H)
+paras2 = ((0.36582294, 0.36580791), (-1.76918702, -1.37241401),\
+    (1.77475033, 1.36685314)) # top and bottom paras
+H = remove_lips(paras2, theta, theta_l, H)
+
 plt.pcolormesh(theta, theta_l, H)
-#plt.plot(theta.T[0],f(a[1],b[1],c[1],theta.T[0]))
 plt.axis([theta.max(),theta.min(),theta_l.max(),theta_l.min()])
 plt.show()
-
-
