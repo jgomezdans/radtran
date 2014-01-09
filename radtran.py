@@ -5,11 +5,13 @@
 # Here are the basic functions used to describe the canopy structure.
 import numpy as np
 import scipy as sc
-from scipy.integrate import quad
+from scipy.integrate import fixed_quad
 import matplotlib.pylab as plt
 import warnings
 import leaf_angle_distributions as lad
 import pdb
+
+lut = np.loadtxt('H_LUT.csv', delimiter=',')
 
 def gl(angle, arch='s', par=None):
   '''The leaf normal angle distribution in radians.
@@ -91,9 +93,9 @@ def G(view, arch='s'):
   if isinstance(view, np.ndarray):
     G = np.zeros_like(view)
     for j,v in enumerate(view):
-      G[j] = quad(g, 0., np.pi/2., args=(v, arch))[0]
+      G[j] = fixed_quad(g, 0., np.pi/2., args=(v, arch))[0]
   else:
-    G = quad(g, 0., np.pi/2., args=(view, arch))[0] # integrate leaf angles between 0 to pi/2.
+    G = fixed_quad(g, 0., np.pi/2., args=(view, arch))[0] # integrate leaf angles between 0 to pi/2.
   return G
 
 def K(view, arch='s'):
@@ -190,6 +192,26 @@ def H(view, angle):
       h = -h
   return h
 
+def H_LUT(view, angle):
+  '''The H function based on a LUT approach based on a corrected
+  surface with discontinuities removed and interpolated values
+  within hyperbolic boundaries. The H_LUT.py script was used to 
+  create the LUT. 
+  Input: view - view or sun zenith angle, angle - leaf zenith angle.
+  Output: H function value.
+  ''' 
+  dim = np.shape(lut)[0]-1
+  x = np.floor(view/np.pi*dim)
+  if isinstance(angle, np.ndarray):
+    h = np.zeros_like(angle)
+    for i, a in enumerate(angle):
+      y = np.floor(a/np.pi*dim)
+      h[i] = lut[y,x]
+  else:
+    y = np.floor(angle/np.pi*dim)
+    h = lut[y,x]
+  return h
+
 def Big_psi(view,sun,leaf,trans_refl):
   '''The kernel which replaces the azimuth dependence
   of the double integral based on the Myneni V.20.
@@ -200,9 +222,11 @@ def Big_psi(view,sun,leaf,trans_refl):
   Output: The kernel.
   '''
   if trans_refl == 't':
-    B_psi = H(view,leaf)*H(sun,leaf) + H(-view,leaf)*H(-sun,leaf)
+    B_psi = H_LUT(view,leaf)*H_LUT(sun,leaf) + \
+        H_LUT(-view,leaf)*H_LUT(-sun,leaf)
   elif trans_refl == 'r':
-    B_psi = H(view,leaf)*H(-sun,leaf) + H(-view,leaf)*H(sun,leaf)
+    B_psi = H_LUT(view,leaf)*H_LUT(-sun,leaf) + \
+        H_LUT(-view,leaf)*H_LUT(sun,leaf)
   else:
     raise Exception('IncorrectRTtype')
   return B_psi
@@ -222,15 +246,21 @@ def Gamma(view=0., sun=0., arch='s', refl=0.2, trans=0.1):
   gam = 4.*np.pi/(refl + trans)*f(view, refl=refl, trans=trans)\
       /3./np.pi*(np.sin(B) - B*np.cos(B)) + trans/3.*np.cos(B) # Myneni V.15
   '''
+  #pdb.set_trace()
   func = lambda leaf, view, sun, arch, refl, trans: gl(leaf, arch)\
       *(refl*Big_psi(view,sun,leaf,'r') + (trans*Big_psi(view,sun,leaf,'t')))
       # the integral as defined in Myneni V.18.
   if isinstance(sun, np.ndarray):
+    sun = np.where(sun==0.,1.0e-10,sun) # to remove singularity at sun==0.
     gam = np.zeros_like(sun)
     for j,s in enumerate(sun):
-      gam[j] = quad(func, 0., np.pi/2., args=(view,s,arch,refl,trans))[0]
+      gam[j] = fixed_quad(func, 0., np.pi/2.,\
+          args=(view,s,arch,refl,trans), n=20)[0]
   else:
-    gam = quad(func, 0., np.pi/2., args=(view,sun,arch,refl,trans))[0] 
+    if sun==0.:
+      sun = 1.0e-10 # to remove singularity at sun==0.
+    gam = fixed_quad(func, 0., np.pi/2.,\
+        args=(view,sun,arch,refl,trans), n=20)[0] 
     # integrate leaf angles between 0 to pi/2.  
   return gam 
 
@@ -277,9 +307,9 @@ def plotGamma():
   Uncomment the first part of Gamma function.
   Output: plots of the Gamma function
   '''
-  tr_rf= np.arange(0.,.6,0.1) # single scattering albedos
-  angles = np.linspace(np.pi, 0., 20)
-  xcos = np.linspace(-1., 1., 20)
+  tr_rf= np.arange(0.,.6,0.1) # transmittance factor for albedo = 1.
+  angles = np.linspace(np.pi, 0., 100)
+  xcos = np.linspace(-1., 1., 100)
   for trans in tr_rf:
     refl = 1. - trans
     gam = Gamma(sun=angles, refl=refl, trans=trans, arch='s')
@@ -293,7 +323,8 @@ def plotGamma():
 
 def plotH():
   '''A function that plots the H values for use in the 
-  Area Scattering Phase Function.
+  Area Scattering Phase Function, and saves the H values to 
+  disk.
   '''
   x = np.linspace(0., np.pi, 500) # view or sun zenith angles
   y = x.copy() # leaf normal zenith angles
@@ -366,6 +397,6 @@ def plotBpsi():
 #pdb.set_trace()
 #plotgl()
 #plotG()
-#plotGamma()
-plotH()
+plotGamma()
+#plotH()
 #plotBpsi()
