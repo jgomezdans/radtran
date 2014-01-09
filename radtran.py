@@ -192,7 +192,7 @@ def H(view, angle):
       h = -h
   return h
 
-def H_LUT(view, angle):
+def H_LUT(view_sun, angle):
   '''The H function based on a LUT approach based on a corrected
   surface with discontinuities removed and interpolated values
   within hyperbolic boundaries. The H_LUT.py script was used to 
@@ -201,7 +201,11 @@ def H_LUT(view, angle):
   Output: H function value.
   ''' 
   dim = np.shape(lut)[0]-1
-  x = np.floor(view/np.pi*dim)
+  if view_sun==0.:
+    x = 2
+    #view_sun = 1.0e-10
+  else:
+    x = np.floor(view_sun/np.pi*dim)
   if isinstance(angle, np.ndarray):
     h = np.zeros_like(angle)
     for i, a in enumerate(angle):
@@ -221,12 +225,14 @@ def Big_psi(view,sun,leaf,trans_refl):
     trans_refl - 'r' reflectance or 't' transmittance.    
   Output: The kernel.
   '''
+  if view==0.:
+    view = 1.0e-10
   if trans_refl == 't':
-    B_psi = H_LUT(view,leaf)*H_LUT(sun,leaf) + \
-        H_LUT(-view,leaf)*H_LUT(-sun,leaf)
+    B_psi = H(view,leaf)*H(sun,leaf) + \
+        H(-view,leaf)*H(-sun,leaf)
   elif trans_refl == 'r':
-    B_psi = H_LUT(view,leaf)*H_LUT(-sun,leaf) + \
-        H_LUT(-view,leaf)*H_LUT(sun,leaf)
+    B_psi = H(view,leaf)*H(-sun,leaf) + \
+        H(-view,leaf)*H(sun,leaf)
   else:
     raise Exception('IncorrectRTtype')
   return B_psi
@@ -242,11 +248,12 @@ def Gamma(view=0., sun=0., arch='s', refl=0.2, trans=0.1):
     refl - fraction reflected, trans - fraction transmitted.
   Output: Area Scattering Phase function value.
   '''
-  '''B = view - sun # uncomment these lines to run test plot
-  gam = 4.*np.pi/(refl + trans)*f(view, refl=refl, trans=trans)\
-      /3./np.pi*(np.sin(B) - B*np.cos(B)) + trans/3.*np.cos(B) # Myneni V.15
   '''
-  #pdb.set_trace()
+  # uncomment/comment the code below for bi-lambetian Gamma.
+  B = sun - view # uncomment these lines to run test plot
+  gam = (refl + trans)/np.pi/3.*(np.sin(B) - B*np.cos(B)) +\
+      trans/np.pi*np.cos(B) # Myneni V.15
+  '''
   func = lambda leaf, view, sun, arch, refl, trans: gl(leaf, arch)\
       *(refl*Big_psi(view,sun,leaf,'r') + (trans*Big_psi(view,sun,leaf,'t')))
       # the integral as defined in Myneni V.18.
@@ -261,7 +268,7 @@ def Gamma(view=0., sun=0., arch='s', refl=0.2, trans=0.1):
       sun = 1.0e-10 # to remove singularity at sun==0.
     gam = fixed_quad(func, 0., np.pi/2.,\
         args=(view,sun,arch,refl,trans), n=20)[0] 
-    # integrate leaf angles between 0 to pi/2.  
+    # integrate leaf angles between 0 to pi/2.
   return gam 
 
 def plotgl():
@@ -310,13 +317,17 @@ def plotGamma():
   tr_rf= np.arange(0.,.6,0.1) # transmittance factor for albedo = 1.
   angles = np.linspace(np.pi, 0., 100)
   xcos = np.linspace(-1., 1., 100)
+  maxy = 0.
+  miny = 0.
   for trans in tr_rf:
     refl = 1. - trans
     gam = Gamma(sun=angles, refl=refl, trans=trans, arch='s')
-    plt.plot(xcos, gam, label=str(trans))
+    plt.plot(angles, gam, label=str(trans))
+    maxy = max(maxy,gam.max())
     #pdb.set_trace()
+  plt.axis([angles.max(),angles.min(),0.,maxy+0.02])
   plt.title('Areas Scattering Phase Function (Gamma)')
-  plt.xlabel('Cos(Phase Angle)')
+  plt.xlabel('Phase Angle (radians)')
   plt.ylabel(r'$\Gamma$/albedo')
   plt.legend(title='trans./albedo')
   plt.show()
@@ -362,23 +373,18 @@ def plotBpsi():
   Bpsi = np.zeros_like(xx)
   #pdb.set_trace()
   fig, axarr = plt.subplots(2, len(view), sharex=True, sharey=True)
-  for row, rt in enumerate(trans_refl):
-    for col, v in enumerate(view):
-      if row != 0:
-        add = len(view)
-      else:
-        add = 0
-      #plt.subplot(2, len(view), col+1 + add)
-      for i in range(len(x)):
-        for j in range(len(y)):
+  for row, rt in enumerate(trans_refl): #refl or transm
+    for col, v in enumerate(view): #views
+      for i in range(len(x)): #sun
+        for j in range(len(y)): #leaf
           Bpsi[i,j] = Big_psi(v, xx[i,j], yy[i,j], rt)
+          #print xx[i,j], yy[i,j]
+          #pdb.set_trace()
       ax = axarr[row][col]
-      im = ax.pcolormesh(xx, yy, Bpsi, vmin=-0.4, vmax=1.)
-      #ax.colorbar()
+      im = ax.pcolormesh(xx, yy, Bpsi, vmin=0., vmax=1.)
       if row == 0:
         ax.set_title('Kernel view zenith\nangle @ %.1f degrees'\
             % (v*180./np.pi))
-      #pdb.set_trace()
       ax.axis([xx.max(),xx.min(),yy.max(),yy.min()])
       if row == 1:
         ax.set_xlabel('Zenith angle illum. (radians)')
