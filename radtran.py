@@ -1,8 +1,12 @@
 #!/usr/bin/python
 
-# This will turn out to be the library for all the functions necessary in our implimentation of the Radiative Transfer of radiation through a canopy. Classes may be implimented when deemed beneficial.
+'''This will turn out to be the library for all the functions necessary 
+in our implimentation of the Radiative Transfer of radiation through a 
+canopy. Classes may be implimented when deemed beneficial. Need to 
+include a specular component as described in Knyazikhin 2004 paper. 
+This will require non-rotational invariant information.
+'''
 
-# Here are the basic functions used to describe the canopy structure.
 import numpy as np
 import scipy as sc
 from scipy.integrate import fixed_quad
@@ -228,11 +232,11 @@ def Big_psi(view,sun,leaf,trans_refl):
   if view==0.:
     view = 1.0e-10
   if trans_refl == 't':
-    B_psi = H(view,leaf)*H(sun,leaf) + \
-        H(-view,leaf)*H(-sun,leaf)
+    B_psi = H_LUT(view,leaf)*H_LUT(sun,leaf) + \
+        H_LUT(-view,leaf)*H_LUT(-sun,leaf)
   elif trans_refl == 'r':
-    B_psi = H(view,leaf)*H(-sun,leaf) + \
-        H(-view,leaf)*H(sun,leaf)
+    B_psi = H_LUT(view,leaf)*H_LUT(-sun,leaf) + \
+        H_LUT(-view,leaf)*H_LUT(sun,leaf)
   else:
     raise Exception('IncorrectRTtype')
   return B_psi
@@ -243,6 +247,11 @@ def Gamma(view=0., sun=0., arch='s', refl=0.2, trans=0.1):
   elaborate function will be needed see V.18. This is the 
   phase function of the scattering in a particular direction
   based also on the amount of interception in the direction.
+  This function can be elaborated using the formula for the 
+  true phase angle based on spehrical trigonometry or the dot
+  product: 
+  np.arccos(np.dot(x,y)/np.sqrt(np.sum(x**2))/np.sqrt(np.sum(y**2)))
+  where x and y are the sun/view and leaf angles.
   Input: view - view zenith angle, sun - the solar zenith angle, 
     arch - archetype, see gl function for description, 
     refl - fraction reflected, trans - fraction transmitted.
@@ -270,6 +279,18 @@ def Gamma(view=0., sun=0., arch='s', refl=0.2, trans=0.1):
         args=(view,sun,arch,refl,trans), n=20)[0] 
     # integrate leaf angles between 0 to pi/2.
   return gam 
+
+def P(view=0., sun=0., arch='s', refl=0.2, trans=0.1):
+  '''The Normalized Scattering Phase Function as described in 
+  Myneni VII.A.13. 
+  Input: view - view zenith angle, sun - the solar zenith angle, 
+    arch - archetype, see gl function for description, 
+    refl - fraction reflected, trans - fraction transmitted.
+  Output: Normalized Scattering Phase function value.
+  '''
+  p = 4.*Gamma(view, sun, arch, refl, trans)/(refl+trans)/\
+      G(sun, arch)
+  return p
 
 def plotgl():
   '''A function to plot the LAD distribution for each 
@@ -321,7 +342,7 @@ def plotGamma():
   miny = 0.
   for trans in tr_rf:
     refl = 1. - trans
-    gam = Gamma(sun=angles, refl=refl, trans=trans, arch='s')
+    gam = P(sun=angles, refl=refl, trans=trans, arch='s')
     plt.plot(angles, gam, label=str(trans))
     maxy = max(maxy,gam.max())
     #pdb.set_trace()
