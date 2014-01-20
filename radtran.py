@@ -424,6 +424,6 @@ def plotBpsi():
 #pdb.set_trace()
 #plotgl()
 #plotG()
-plotGamma()
+#plotGamma()
 #plotH()
 #plotBpsi()
