@@ -28,7 +28,7 @@ class rt_layers():
   Ouput: a rt_layers class.
   '''
 
-  def __init__(self, Tol = 1.e-6, Iter = 200, K = 10, N = 100,\
+  def __init__(self, Tol = 1.e-6, Iter = 200, K = 10, N = 20,\
       Lc = 2., refl = 0.2, trans = 0.1, refl_s = 0.3, I0 = 1.,\
       sun0 = np.pi, arch = 's'):
     '''The constructor for the rt_layers class.
@@ -37,6 +37,9 @@ class rt_layers():
     self.Tol = Tol
     self.Iter = Iter
     self.K = K
+    if int(N) % 2 == 1:
+      N = int(N)+1
+      print 'N rounded up to even number:', str(N)
     self.N = N
     self.Lc = Lc
     self.refl = refl
@@ -45,6 +48,75 @@ class rt_layers():
     self.I0 = I0
     self.sun0 = sun0
     self.arch = arch
+    self.albedo = self.refl + self.trans
+
+    # intervals
+    dk = Lc/K
+    mid_ks = np.arange(dk/2.,Lc,dk)
+    self.n = self.N/2
+    
+    # node arrays and boundary arrays
+    self.views = np.linspace(0.,np.pi,N)
+    self.suns = np.linspace(np.pi,0.,N)
+    self.Inodes = np.zeros((K,3,N)) # K, upper-mid-lower, N 
+    self.Jnodes = np.zeros((K,N))
+    self.Q1nodes = self.Jnodes.copy()
+    self.Q2nodes = self.Jnodes.copy()
+    for (i, k) in enumerate(mid_ks):
+      for (j, v) in enumerate(self.views):
+        self.Q1nodes[i,j] = self.Q1(v,k)
+        self.Q2nodes[i,j] = self.Q2(v,k)
+    self.Bounds = np.zeros((2,N))
+    
+
+    # discrete ordinate equations
+    g = G(self.views,arch)
+    mu = np.cos(self.views) 
+    self.a = (1. + g*dk/2./mu)/(1. - g*dk/2./mu)
+    self.b = (g*dk/mu)/(1. + g*dk/2./mu)
+    self.c = (g*dk/mu)/(1. - g*dk/2./mu)
+
+  def I_down(self, k):
+    '''The discrete ordinate downward equation.
+    '''
+    n = self.n
+    self.Inodes[k,2,n:] = self.a[n:]*self.Inodes[k,0,n:] - \
+        self.c[n:]*(self.Jnodes[k,n:] + self.Q1nodes[k,n:] + \
+        self.Q2nodes[k,n:])
+    if k < self.K-1:
+      self.Inodes[k+1,0,n:] = self.Inodes[k,2,n:]
+  
+  def I_up(self, k):
+    '''The discrete ordinate upward equation.
+    '''
+    n = self.n
+    self.Inodes[k,0,:n] = 1./self.a[:n]*self.Inodes[k,2,:n] + \
+        self.b[:n]*(self.Jnodes[k,:n] + self.Q1nodes[k,:n] + \
+        self.Q2nodes[k,:n])
+    if k != 0:
+      self.Inodes[k-1,2,:n] = self.Inodes[k,0,:n]
+
+  def reverse(self):
+    '''Reverses the transmissivity at soil boundary.
+    '''
+    n = self.n
+    pdb.set_trace()
+    Ir = np.cos(self.views[n:]) * self.Inodes[self.K-1,2,n:]
+    self.Inodes[self.K-1,2,:n] = -2.*self.refl_s*np.average(Ir)
+  
+  def solve(self):
+    for k in range(self.K):
+      self.I_down(k)
+      print 'I at k:%d' % (k)
+      print self.Inodes[k]
+    self.reverse()
+    print 'reversed at k:%d' % (k)
+    print self.Inodes[k]
+    pdb.set_trace()
+    for k in range(self.K-1,-1,-1):
+      self.I_up(k)
+      print 'I at k:%d' % (k)
+      print self.Inodes[k]
 
   def __del__(self):
     '''The post garbage collection method.
@@ -61,7 +133,7 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
         self.Lc, self.refl, self.trans, self.refl_s, self.I0, \
         self.sun0, self.arch)
 
-  def I_f(angle, L, I, arch):
+  def I_f(self, angle, L, I):
     '''A function that will operate as the Beer's law exponential 
     formula. It requires the angle in radians, the 
     optical depth or LAI, and the initial intensity or flux. The
@@ -74,10 +146,10 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
     Output: the intensity or flux at L.
     '''
     mu = np.cos(angle)
-    i =  I * np.exp(G(angle,arch)*L/mu)
+    i =  I * np.exp(G(angle,self.arch)*L/mu)
     return i
 
-  def J(self, view, sun, arch, refl, trans, Ia):
+  def J(self, view, sun, Ia):
     '''The J or Distributed Source Term according to Myneni 1988b
     (23). This gives the multiple scattering as opposed to First 
     Collision term Q.
@@ -90,15 +162,15 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
     # expected that sun is a list of all incomming illumination
     # angles.
     if isinstance(sun, np.ndarray) and isinstance(Ia, np.ndarray):
-      albedo = refl + trans
-      integ1 = np.multiply(Ia,P(view,sun,arch,refl,trans))
-      integ = np.multiply(integ1,G(sun,arch)/G(view,arch))
-      j = albedo / 2. * np.sum(integ)
+      integ1 = np.multiply(Ia,P(view,sun,self.arch,self.refl,self.trans))
+      integ = np.multiply(integ1,G(sun,self.arch)/G(view,self.arch))
+      # element-by-element multiplication
+      j = self.albedo / 2. * np.sum(integ)
     else:
       raise Exception('ArrayInputRequired')
     return j
 
-  def Q1(view, sun0, arch, refl, trans, L, I0):
+  def Q1(self, view, L):
     '''The Q1 First First Collision Source Term as defined in Myneni
     1988b (24). This is the downwelling part of the Q term. 
     Input: view - the zenith angle of evaluation, sun0 - the uncollided
@@ -106,15 +178,12 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
     trans - transmittance, L - LAI, I0 - flux or intensity at TOC.
     Ouput: The Q1 term.
     '''
-    if isinstance(sun0, np.ndarray):
-      raise Exception('SunScalarRequired')
-    else: 
-      albedo = refl + trans
-      q = albedo / 4. * P(view,sun0,arch,refl,trans)*G(sun0,arch)/\
-          G(view,arch) * I_f(sun0, L, I0, arch)
+    q = self.albedo / 4. * P(view,self.sun0,self.arch,self.refl,\
+        self.trans)*G(self.sun0,self.arch)/G(view,self.arch) *\
+        self.I_f(self.sun0, L, self.I0)
     return q
 
-  def Q2(view, sun0, n_angles, arch, refl, trans, Lc, L, I0, refl_s):
+  def Q2(self, view, L):
     '''The Q2 Second First Collision Source Term as defined in
     Myneni 1988b (24). This is the upwelling part of the Q term.
     Input: view - the view zenith angle of evalution, sun0 - the 
@@ -125,14 +194,14 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
     soil reflectance.
     Output: The Q2 term.
     '''
-    sun_up = np.linspace(np.pi/2.,0.,n_angles/2)
-    albedo = refl + trans
-    dL = Lc - L
-    integ1 = np.multiply(P(view,sun_up,arch,refl,trans),\
-        G(sun_up,arch)/G(view,arch)) # element-by-element multipl.
-    integ = np.multiply(integ1, I_f(sun_up, -dL, 1., arch)) # ^^
-    q = albedo / 4. * -2. * refl_s * np.cos(sun0) * \
-        I_f(sun0, Lc, I0, arch) * np.sum(integ)
+    sun_up = np.linspace(np.pi/2.,0.,self.N/2)
+    dL = self.Lc - L
+    integ1 = np.multiply(P(view,sun_up,self.arch,self.refl,self.trans),\
+        G(sun_up,self.arch)/G(view,self.arch)) 
+        # element-by-element multipl.
+    integ = np.multiply(integ1, self.I_f(sun_up, -dL, 1.)) # ^^
+    q = self.albedo / 4. * -2. * self.refl_s * np.cos(self.sun0) * \
+        self.I_f(self.sun0, self.Lc, self.I0) * np.sum(integ)
     return q
 
   def plot_J(self):
@@ -150,11 +219,11 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
     index = round(np.pi - self.sun0)*self.N/np.pi
     Ia[index] = self.I0
     for v in view:
-      j.append(self.J(v,sun,self.arch,self.refl,self.trans,Ia))
+      j.append(self.J(v,sun,Ia))
     plt.plot(sun,j,'--r')
     plt.show()
 
-  def plot_Q1(sun0,n_angles,arch,refl,trans,L,I0):
+  def plot_Q1(self,L):
     '''A function that plots the Q1 function.
     It requires the single sun angle (not list) for uncollided
     Downwelling illumination, the number of view angles to 
@@ -165,14 +234,14 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
     LAI, I0 - Flux at TOC.
     Output: Q1 term
     '''
-    view = np.linspace(0.,np.pi,n_angles)
+    view = np.linspace(0.,np.pi,self.N)
     q = []
     for v in view:
-      q.append(Q1(v, sun0, arch, refl, trans, L, I0))
+      q.append(self.Q1(v, L))
     plt.plot(view,q,'--r')
     plt.show()
 
-  def plot_Q2(sun0, n_angles, arch, refl, trans, Lc, L, I0, rs):
+  def plot_Q2(self, L):
     '''A function that plots the Q2 function. To be noted is that
     this is the upwelling component of the first collision term Q.
     The graph would then portray greater scattering in the lower
@@ -180,22 +249,22 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
     Input: sun, n_angles, arch, refl trans, Lc, L, I0, rs.
     Ouput: Q2 term.
     '''
-    view = np.linspace(0.,np.pi,n_angles)
+    view = np.linspace(0.,np.pi,self.N)
     q = []
     for v in view:
-      q.append(Q2(v, sun0, n_angles, arch, refl, trans, Lc, L, I0, rs))
+      q.append(self.Q2(v, L))
     plt.plot(view,q,'--r')
     plt.show()
 
-  def plot_Q(sun0,n_angles,arch,refl,trans,Lc,L,I0,rs):
+  def plot_Q(self,L):
     '''A function that plots the Q function as sum of Q1 and Q2.
 
     '''
-    view = np.linspace(0.,np.pi,n_angles)
+    view = np.linspace(0.,np.pi,self.N)
     q = []
     for v in view:
-      q.append(Q1(v, sun0, arch, refl, trans, L, I0)+\
-          Q2(v, sun0, n_angles, arch, refl, trans, Lc, L, I0, rs))
+      q.append(self.Q1(v, L)+\
+          self.Q2(v, L))
     plt.plot(view,q,'--r')
     plt.show()
 
