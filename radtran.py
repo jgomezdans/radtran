@@ -267,7 +267,8 @@ def Gamma(view=0., sun=0., arch='s', refl=0.2, trans=0.1):
       *(refl*Big_psi(view,sun,leaf,'r') + (trans*Big_psi(view,sun,leaf,'t')))
       # the integral as defined in Myneni V.18.
   if isinstance(sun, np.ndarray):
-    sun = np.where(sun==0.,1.0e-10,sun) # to remove singularity at sun==0.
+    # to remove singularity at sun==0.
+    sun = np.where(sun==0.,1.0e-10,sun) 
     gam = np.zeros_like(sun)
     for j,s in enumerate(sun):
       gam[j] = fixed_quad(func, 0., np.pi/2.,\

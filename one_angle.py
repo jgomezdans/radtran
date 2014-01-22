@@ -28,9 +28,9 @@ class rt_layers():
   Ouput: a rt_layers class.
   '''
 
-  def __init__(self, Tol = 1.e-6, Iter = 200, K = 10, N = 20,\
-      Lc = 2., refl = 0.2, trans = 0.1, refl_s = 0.3, I0 = 1.,\
-      sun0 = np.pi, arch = 's'):
+  def __init__(self, Tol = 1.e-6, Iter = 200, K = 20, N = 16,\
+      Lc = 4., refl = 0.25, trans = 0.1, refl_s = 0.2, I0 = 1.,\
+      sun0 = np.pi, arch = 'u'):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
     '''
@@ -100,23 +100,61 @@ class rt_layers():
     '''Reverses the transmissivity at soil boundary.
     '''
     n = self.n
-    pdb.set_trace()
     Ir = np.cos(self.views[n:]) * self.Inodes[self.K-1,2,n:]
-    self.Inodes[self.K-1,2,:n] = -2.*self.refl_s*np.average(Ir)
+    self.Inodes[self.K-1,2,:n] = np.average(-self.refl_s*Ir)
+
+  def converge(self):
+
+    misclose_top = np.abs((self.Inodes[0,0] - self.Bounds[0])/\
+        self.Inodes[0,0])
+    misclose_bot = np.abs((self.Inodes[self.K-1,2] - \
+        self.Bounds[1])/self.Inodes[self.K-1,2])
+    max_top = max(misclose_top)
+    max_bot = max(misclose_bot)
+    print 'misclosures top: %.g, and bottom: %.g.' %\
+        (max_top, max_bot)
+    if max_top  <= self.Tol and max_bot <= self.Tol:
+      return True
+    else:
+      return False
   
   def solve(self):
-    for k in range(self.K):
-      self.I_down(k)
-      print 'I at k:%d' % (k)
-      print self.Inodes[k]
-    self.reverse()
-    print 'reversed at k:%d' % (k)
-    print self.Inodes[k]
-    pdb.set_trace()
-    for k in range(self.K-1,-1,-1):
-      self.I_up(k)
-      print 'I at k:%d' % (k)
-      print self.Inodes[k]
+    
+    for i in range(self.Iter):
+      # forward sweep into the slab
+      for k in range(self.K):
+        self.I_down(k)
+      # reverse the diffuse transmissivity
+      self.reverse()
+      # backsweep out of the slab
+      for k in range(self.K-1,-1,-1):
+        self.I_up(k)
+      # check for negativity in flux
+      if np.min(self.Inodes) < 0.:
+        print 'negative values in flux'
+        pdb.set_trace()
+      # compute I_k+1/2 and J_k+1/2
+      for k in range(self.K):
+        self.Inodes[k,1] = (self.Inodes[k,0] + self.Inodes[k,2])/2.
+        for v in self.views:
+          self.Jnodes[k,v] = self.J(v,self.suns,self.Inodes[k,1])
+      # acceleration can be implimented here...
+      # check for convergence
+      print self.Inodes
+      print 'iteration no: %d completed.' % (i+1)
+      if self.converge():
+        self.Inodes[0,0] += self.Q2nodes[0]
+        print 'solution at iteration %d and saved in class.Inodes.'\
+            % (i+1)
+        return self.Inodes
+        break
+      else:
+        # swap boundary for new flux
+        self.Bounds[0] = self.Inodes[0,0,::-1]
+        self.Bounds[0,:self.n] = self.Inodes[0,0,:self.n]
+        self.Bounds[1] = self.Inodes[self.K-1,2]
+        continue
+
 
   def __del__(self):
     '''The post garbage collection method.
