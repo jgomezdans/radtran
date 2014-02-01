@@ -10,9 +10,24 @@ import numpy as np
 import scipy as sc
 import matplotlib.pylab as plt
 import warnings
+import pickle
+import os
 from radtran import *
 import nose
 import pdb
+
+# Gaussian quadratures sets to be used in instances
+gauss_f_mu = open('lgvalues-abscissa.dat','rb')
+gauss_f_wt = open('lgvalues-weights.dat','rb')
+gauss_mu = pickle.load(gauss_f_mu)
+gauss_wt = pickle.load(gauss_f_wt)
+# sort all dictionary items
+for k in gauss_mu.keys():
+  ml = gauss_mu[k]
+  wl = gauss_wt[k]
+  ml, wl = zip(*sorted(zip(ml,wl),reverse=True))
+  gauss_mu[k] = ml
+  gauss_wt[k] = wl
 
 class rt_layers():
   '''The class that will encapsulate the data and methods to be used
@@ -22,15 +37,16 @@ class rt_layers():
   has completed.
   Input: Tol - max tolerance, Iter - max iterations, N - no of 
   discrete ordinates over 0 to pi, K - no of nodes, Lc - total LAI, 
-  refl - l eaf reflectance, trans - leaf transmittance, refl_s - 
+  refl - leaf reflectance, trans - leaf transmittance, refl_s - 
   soil reflectance, I0 - Downward flux at TOC, sun0 - zenith angle
   of solar illumination.
   Ouput: a rt_layers class.
   '''
 
-  def __init__(self, Tol = 1.e-6, Iter = 200, K = 20, N = 16,\
-      Lc = 4., refl = 0.25, trans = 0.1, refl_s = 0.2, I0 = 1.,\
-      sun0 = np.pi, arch = 'u'):
+
+  def __init__(self, Tol = 1.e-5, Iter = 200, K = 40, N = 16,\
+      Lc = 1., refl = 0.4357, trans = 0.5089, refl_s = 0.35, I0 = 1.,\
+      sun0 = 150., arch = 's'):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
     '''
@@ -46,28 +62,28 @@ class rt_layers():
     self.trans = trans
     self.refl_s = refl_s
     self.I0 = I0
-    self.sun0 = sun0
+    self.sun0 = sun0 * np.pi / 180.
     self.arch = arch
-    self.albedo = self.refl + self.trans
+    self.albedo = self.refl + self.trans # leaf single scattering albedo
+    self.gauss_wt = np.array(gauss_wt[str(N)])
+    self.gauss_mu = np.array(gauss_mu[str(N)])
 
     # intervals
     dk = Lc/K
-    mid_ks = np.arange(dk/2.,Lc,dk)
+    self.mid_ks = np.arange(dk/2.,Lc,dk)
     self.n = self.N/2
     
     # node arrays and boundary arrays
-    self.views = np.linspace(0.,np.pi,N)
-    self.suns = np.linspace(np.pi,0.,N)
-    self.Inodes = np.zeros((K,3,N)) # K, upper-mid-lower, N 
+    self.views = np.arccos(self.gauss_mu)
+    self.Inodes = np.zeros((K,3,N)) # K, upper-mid-lower, N
     self.Jnodes = np.zeros((K,N))
     self.Q1nodes = self.Jnodes.copy()
     self.Q2nodes = self.Jnodes.copy()
-    for (i, k) in enumerate(mid_ks):
-      for (j, v) in enumerate(self.views):
-        self.Q1nodes[i,j] = self.Q1(v,k)
-        self.Q2nodes[i,j] = self.Q2(v,k)
+    for (i, k) in enumerate(self.mid_ks):
+      for (j, v) in enumerate(self.views): # may need to distinguish
+        self.Q1nodes[i,j] = self.Q1(v,k) # between Q1 downward [n:]
+        self.Q2nodes[i,j] = self.Q2(v,k) # and Q2 upward [:n].Pinty...:
     self.Bounds = np.zeros((2,N))
-    
 
     # discrete ordinate equations
     g = G(self.views,arch)
@@ -76,6 +92,15 @@ class rt_layers():
     self.b = (g*dk/mu)/(1. + g*dk/2./mu)
     self.c = (g*dk/mu)/(1. - g*dk/2./mu)
 
+  def sun0(self,sun0):
+    '''Method used for entering solar insolation angle which
+    takes care of conversion to radians. Try not to assign 
+    angles directly to self.sun0 variable but use this method.
+    Input: sun0 - solar zenith angle in degrees.
+    Output: converts and stores value in self.sun0.
+    '''
+    self.sun0 = sun0*np.pi/180.
+
   def I_down(self, k):
     '''The discrete ordinate downward equation.
     '''
@@ -83,6 +108,15 @@ class rt_layers():
     self.Inodes[k,2,n:] = self.a[n:]*self.Inodes[k,0,n:] - \
         self.c[n:]*(self.Jnodes[k,n:] + self.Q1nodes[k,n:] + \
         self.Q2nodes[k,n:])
+    #print self.Inodes[k,2]
+    #pdb.set_trace()
+    if min(self.Inodes[k,2,n:]) < 0.:
+      self.Inodes[k,2,n:] = np.where(self.Inodes[k,2,n:] < 0., \
+        0., self.Inodes[k,2,n:]) # negative fixup need to revise....
+      print 'Negative downward flux fixup performed at node %d' \
+          %(k+1)
+    #print self.Inodes[k,2]
+    #pdb.set_trace()
     if k < self.K-1:
       self.Inodes[k+1,0,n:] = self.Inodes[k,2,n:]
   
@@ -93,6 +127,13 @@ class rt_layers():
     self.Inodes[k,0,:n] = 1./self.a[:n]*self.Inodes[k,2,:n] + \
         self.b[:n]*(self.Jnodes[k,:n] + self.Q1nodes[k,:n] + \
         self.Q2nodes[k,:n])
+    #print self.Inodes[k,0]
+    #pdb.set_trace()
+    if min(self.Inodes[k,0,:n]) < 0.:
+      self.Inodes[k,0,:n] = np.where(self.Inodes[k,0,:n] < 0., \
+         0., self.Inodes[k,0,:n]) # negative fixup need to revise...
+    #print self.Inodes[k,0]
+    #pdb.set_trace()
     if k != 0:
       self.Inodes[k-1,2,:n] = self.Inodes[k,0,:n]
 
@@ -100,11 +141,17 @@ class rt_layers():
     '''Reverses the transmissivity at soil boundary.
     '''
     n = self.n
-    Ir = np.cos(self.views[n:]) * self.Inodes[self.K-1,2,n:]
-    self.Inodes[self.K-1,2,:n] = np.average(-self.refl_s*Ir)
+    Ir = np.multiply(np.cos(self.views[n:]),\
+        self.Inodes[self.K-1,2,n:])
+    self.Inodes[self.K-1,2,:n] = - 2. * self.refl_s * \
+        np.sum(Ir*self.gauss_wt[n:]) 
+        # revise: not sure I need gaussian quad wts here
+    #print self.Inodes[self.K-1,2]
+    #pdb.set_trace()
 
   def converge(self):
-
+    '''Check for convergence and returns true if converges.
+    '''
     misclose_top = np.abs((self.Inodes[0,0] - self.Bounds[0])/\
         self.Inodes[0,0])
     misclose_bot = np.abs((self.Inodes[self.K-1,2] - \
@@ -113,13 +160,21 @@ class rt_layers():
     max_bot = max(misclose_bot)
     print 'misclosures top: %.g, and bottom: %.g.' %\
         (max_top, max_bot)
+    #pdb.set_trace()
     if max_top  <= self.Tol and max_bot <= self.Tol:
       return True
     else:
       return False
   
   def solve(self):
-    
+    '''The solver. Run this as a method of the instance of the
+    rt_layers class to solve the RT equations. You first need
+    to create an instance of the class though using:
+    eg. test = rt_layers() # see rt_layers for more options.
+    then test.solve().
+    Input: none.
+    Output: the fluxes at discrete ordinates and nodes.
+    '''
     for i in range(self.Iter):
       # forward sweep into the slab
       for k in range(self.K):
@@ -131,30 +186,36 @@ class rt_layers():
         self.I_up(k)
       # check for negativity in flux
       if np.min(self.Inodes) < 0.:
+        # print self.Inodes
         print 'negative values in flux'
         pdb.set_trace()
       # compute I_k+1/2 and J_k+1/2
       for k in range(self.K):
         self.Inodes[k,1] = (self.Inodes[k,0] + self.Inodes[k,2])/2.
-        for v in self.views:
-          self.Jnodes[k,v] = self.J(v,self.suns,self.Inodes[k,1])
+        for j, v in enumerate(self.views):
+          self.Jnodes[k,j] = self.J(v,self.views,self.Inodes[k,1])
+          # test the Shultis 1988 paper reevaluating J and Q
+          #pdb.set_trace()
+          #self.Q1nodes[k,j] = self.Q1(v,reval=True,k=k,i=j)
+      #print self.Jnodes[0]
+      #pdb.set_trace()
       # acceleration can be implimented here...
       # check for convergence
-      print self.Inodes
+      print self.Inodes[0,0]
       print 'iteration no: %d completed.' % (i+1)
       if self.converge():
-        self.Inodes[0,0] += self.Q2nodes[0]
+        self.Inodes[0,0,:self.n] += self.Q2nodes[0,:self.n]
         print 'solution at iteration %d and saved in class.Inodes.'\
             % (i+1)
-        return self.Inodes
+        os.system('play --no-show-progress --null --channels 1 \
+            synth %s sine %f' % ( 0.5, 500)) # ring the bell
+        return self.Inodes[0,0]
         break
       else:
         # swap boundary for new flux
-        self.Bounds[0] = self.Inodes[0,0,::-1]
-        self.Bounds[0,:self.n] = self.Inodes[0,0,:self.n]
+        self.Bounds[0] = self.Inodes[0,0]
         self.Bounds[1] = self.Inodes[self.K-1,2]
         continue
-
 
   def __del__(self):
     '''The post garbage collection method.
@@ -167,7 +228,7 @@ class rt_layers():
     '''
     return '''Tol = %.e, Iter = %i, K = %i, N = %i, Lc = %.3f, 
 refl = %.3f, trans = %.3f, refl_s = %.3f, I0 = %.4f,
-sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
+sun0 = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
         self.Lc, self.refl, self.trans, self.refl_s, self.I0, \
         self.sun0, self.arch)
 
@@ -192,7 +253,7 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
     (23). This gives the multiple scattering as opposed to First 
     Collision term Q.
     Input: view - the zenith angle of evaluation, sun - the illumination
-    zenith angle, arch - archtype, refl - reflectance, trans - 
+    zenith angles array, arch - archtype, refl - reflectance, trans - 
     transmittance, L - LAI, Ia - array of fluxes or intensities at
     the sun zenith angles with Ia[0] at sun = pi.
     Output: The J term.
@@ -203,12 +264,13 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
       integ1 = np.multiply(Ia,P(view,sun,self.arch,self.refl,self.trans))
       integ = np.multiply(integ1,G(sun,self.arch)/G(view,self.arch))
       # element-by-element multiplication
-      j = self.albedo / 2. * np.sum(integ)
+      # numerical integration by gaussian qaudrature
+      j = self.albedo / 2. * np.sum(integ*self.gauss_wt)
     else:
       raise Exception('ArrayInputRequired')
     return j
 
-  def Q1(self, view, L):
+  def Q1(self, view, L=np.nan, reval=False, k=np.nan, i=np.nan):
     '''The Q1 First First Collision Source Term as defined in Myneni
     1988b (24). This is the downwelling part of the Q term. 
     Input: view - the zenith angle of evaluation, sun0 - the uncollided
@@ -216,9 +278,13 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
     trans - transmittance, L - LAI, I0 - flux or intensity at TOC.
     Ouput: The Q1 term.
     '''
+
+    if reval:
+      I = self.Inodes[k,1,i]
+    else:
+      I = self.I_f(self.sun0, L, self.I0)
     q = self.albedo / 4. * P(view,self.sun0,self.arch,self.refl,\
-        self.trans)*G(self.sun0,self.arch)/G(view,self.arch) *\
-        self.I_f(self.sun0, L, self.I0)
+        self.trans)*G(self.sun0,self.arch)/G(view,self.arch) * I
     return q
 
   def Q2(self, view, L):
@@ -232,14 +298,16 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
     soil reflectance.
     Output: The Q2 term.
     '''
-    sun_up = np.linspace(np.pi/2.,0.,self.N/2)
+    sun_up = self.views[:self.n]
     dL = self.Lc - L
     integ1 = np.multiply(P(view,sun_up,self.arch,self.refl,self.trans),\
         G(sun_up,self.arch)/G(view,self.arch)) 
         # element-by-element multipl.
     integ = np.multiply(integ1, self.I_f(sun_up, -dL, 1.)) # ^^
     q = self.albedo / 4. * -2. * self.refl_s * np.cos(self.sun0) * \
-        self.I_f(self.sun0, self.Lc, self.I0) * np.sum(integ)
+        self.I_f(self.sun0, self.Lc, self.I0) * \
+        np.sum(integ*self.gauss_wt[:self.n]) 
+        # numerical integration by gaussian quadrature
     return q
 
   def plot_J(self):
@@ -306,11 +374,28 @@ sun = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, self.N, \
     plt.plot(view,q,'--r')
     plt.show()
 
-'''
-def setup():
- 
-
-def test_I_f():
-'''
-
+  def plot_brf(self, k=0):
+    '''A function to plot the upward and downward scattering at
+    a specified node. If no parameters are passes assumes upward
+    scattering at TOC and downward scattering at soil layer.
+    Input: k - node number starting at TOC = 0.
+    Output: plot of scattering.
+    '''
+    if k==0:
+      k2 = self.K-1
+    else:
+      k2 = k
+    views = self.views*180./np.pi
+    flux = np.append(self.Inodes[k,0,:self.n],\
+        self.Inodes[k2,2,self.n:])/-np.cos(self.sun0)
+    brf = self.Q1nodes[0] + self.Q2nodes[0] + self.Q1nodes[0]
+        # divide by sun angle
+    plt.plot(views,brf,'rx',label='BRF')
+    plt.plot(views,flux,'bx',label='Flux')
+    plt.title('BRF at %d and Normalized Flux at %d & %d' %\
+        (k,k,k2))
+    plt.legend()
+    plt.xlabel('View Zenith Angle')
+    plt.ylabel('Refl. and Trans.')
+    plt.show()
 

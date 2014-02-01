@@ -1,9 +1,10 @@
 #!/usr/bin/python
 
-'''This will turn out to be the library for all the functions necessary 
-in our implimentation of the Radiative Transfer of radiation through a 
-canopy. Classes may be implimented when deemed beneficial. Need to 
-include a specular component as described in Knyazikhin 2004 paper. 
+'''This will turn out to be the library for all the functions
+necessary in our implimentation of the Radiative Transfer of 
+radiation through a canopy. Classes may be implimented when 
+deemed beneficial. Need to include a specular component as 
+described in Knyazikhin 2004 paper. 
 This will require non-rotational invariant information.
 '''
 
