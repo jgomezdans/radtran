@@ -18,7 +18,7 @@ import pdb
 
 lut = np.loadtxt('H_LUT.csv', delimiter=',')
 
-def gl(angle, arch='s', par=None):
+def gl(angle, arch, par=None):
   '''The leaf normal angle distribution in radians.
   The distributions are based on Myneni III.21 - .23 for 
   planophile, erectophile and plagiophile which itself is
@@ -37,6 +37,7 @@ def gl(angle, arch='s', par=None):
     parameters for the kuusk and campbell distributions.
   Output: g value at angle
   '''
+  angle = np.abs(angle)
   if arch=='p': # planophile
     gl = 2./np.pi*(1. + np.cos(2.*angle))
   elif arch=='e': # erectophile
@@ -69,7 +70,7 @@ def gl(angle, arch='s', par=None):
 def psi(angle, view):
   '''The kernel which replaces the azimuth dependence
   of the double integral based on the Myneni III.13.
-  Input: angle - the leaf zenith angel in radians,
+  Input: angle - the leaf zenith angle in radians,
   view - the view zenith angle in radians.
   Output: The kernel.
   '''
@@ -83,7 +84,7 @@ def psi(angle, view):
       np.sqrt(1. - np.cos(angle)**2)*np.sqrt(1. - np.cos(view)**2)*np.sin(phit))
   return psiv
 
-def G(view, arch='s'):
+def G(view, arch):
   '''The Geometry factor for a specific view or solar
   direction based on Myneni III.16. The projection of 1 unit 
   area of leaves within a unit volume onto the plane perpen-
@@ -98,12 +99,12 @@ def G(view, arch='s'):
   if isinstance(view, np.ndarray):
     G = np.zeros_like(view)
     for j,v in enumerate(view):
-      G[j] = fixed_quad(g, 0., np.pi/2., args=(v, arch))[0]
+      G[j] = fixed_quad(g, 0., np.pi/2., args=(v, arch),n=16)[0]
   else:
-    G = fixed_quad(g, 0., np.pi/2., args=(view, arch))[0] # integrate leaf angles between 0 to pi/2.
+    G = fixed_quad(g, 0., np.pi/2., args=(view, arch),n=16)[0] # integrate leaf angles between 0 to pi/2.
   return G
 
-def K(view, arch='s'):
+def K(view, arch):
   '''The Extinction Coefficient for direct beam radiation
   based on Myneni IV.7.
   Input: view - the view or solar zenith angle in radians,
@@ -112,7 +113,7 @@ def K(view, arch='s'):
   '''
   return -G(view, arch)/np.cos(view)
 
-def P0(view, arch='s', L=5., N=10., Disp='pois'):
+def P0(view, arch, L, N, Disp='pois'):
   '''The Gap Probability or Zero Term based on Myneni III.33-
   III.35. Simply the fraction of unit horisontal area at 
   depth L that is sunlit. The 3 distributions are as follows:
@@ -143,7 +144,7 @@ def P0(view, arch='s', L=5., N=10., Disp='pois'):
     raise Exception('IncorrectDistrType')
   return p
 
-def f(view, angle=0., sun=0., arch='s', refl=0.2, trans=0.1):
+def f(view, angle, sun, arch, refl, trans):
   '''The Leaf Scattering Transfer Function based on
   Myneni V.9. and Shultis (16) isotropic leaf
   scattering assumption. This is leaf single-scattering
@@ -226,7 +227,7 @@ def Big_psi(view,sun,leaf,trans_refl):
   of the double integral based on the Myneni V.20.
   Input: view - the view zenith angle in radians,
     sun - the sun/illumination zenith angle,
-    leaf - the leaf zenith angel in radians,
+    leaf - the leaf zenith angle in radians,
     trans_refl - 'r' reflectance or 't' transmittance.    
   Output: The kernel.
   '''
@@ -242,7 +243,7 @@ def Big_psi(view,sun,leaf,trans_refl):
     raise Exception('IncorrectRTtype')
   return B_psi
 
-def Gamma(view=0., sun=0., arch='s', refl=0.2, trans=0.1):
+def Gamma(view, sun, arch, refl, trans):
   '''The Area Scattering Phase Function based on Myneni V.18
   and Shultis (17) isotropic scattering assumption. A more 
   elaborate function will be needed see V.18. This is the 
@@ -273,16 +274,16 @@ def Gamma(view=0., sun=0., arch='s', refl=0.2, trans=0.1):
     gam = np.zeros_like(sun)
     for j,s in enumerate(sun):
       gam[j] = fixed_quad(func, 0., np.pi/2.,\
-          args=(view,s,arch,refl,trans), n=20)[0]
+          args=(view,s,arch,refl,trans),n=16)[0]
   else:
     if sun==0.:
       sun = 1.0e-10 # to remove singularity at sun==0.
     gam = fixed_quad(func, 0., np.pi/2.,\
-        args=(view,sun,arch,refl,trans), n=20)[0] 
+        args=(view,sun,arch,refl,trans),n=16)[0] 
     # integrate leaf angles between 0 to pi/2.
   return gam 
 
-def P(view=0., sun=0., arch='s', refl=0.2, trans=0.1):
+def P(view, sun, arch, refl, trans):
   '''The Normalized Scattering Phase Function as described in 
   Myneni VII.A.13. 
   Input: view - view zenith angle, sun - the solar zenith angle, 
@@ -344,7 +345,7 @@ def plotGamma():
   miny = 0.
   for trans in tr_rf:
     refl = 1. - trans
-    gam = P(sun=angles, refl=refl, trans=trans, arch='s')
+    gam = Gamma(view=0., sun=angles, refl=refl, trans=trans, arch='e')
     plt.plot(angles, gam, label=str(trans))
     maxy = max(maxy,gam.max())
     #pdb.set_trace()
