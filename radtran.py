@@ -11,10 +11,25 @@ This will require non-rotational invariant information.
 import numpy as np
 import scipy as sc
 from scipy.integrate import fixed_quad
+from scipy.integrate import quad
 import matplotlib.pylab as plt
 import warnings
+import pickle
 import leaf_angle_distributions as lad
 import pdb
+
+# Gaussian quadratures sets to be used in instances
+gauss_f_mu = open('lgvalues-abscissa.dat','rb')
+gauss_f_wt = open('lgvalues-weights.dat','rb')
+gauss_mu = pickle.load(gauss_f_mu)
+gauss_wt = pickle.load(gauss_f_wt)
+# sort all dictionary items
+for k in gauss_mu.keys():
+  ml = gauss_mu[k]
+  wl = gauss_wt[k]
+  ml, wl = zip(*sorted(zip(ml,wl),reverse=True))
+  gauss_mu[k] = ml
+  gauss_wt[k] = wl
 
 lut = np.loadtxt('H_LUT.csv', delimiter=',')
 
@@ -37,7 +52,7 @@ def gl(angle, arch, par=None):
     parameters for the kuusk and campbell distributions.
   Output: g value at angle
   '''
-  angle = np.abs(angle)
+  #angle = np.abs(angle)
   if arch=='p': # planophile
     gl = 2./np.pi*(1. + np.cos(2.*angle))
   elif arch=='e': # erectophile
@@ -50,9 +65,9 @@ def gl(angle, arch, par=None):
     gl = 2./np.pi*(1. + np.cos(4.*angle))
   elif arch=='u': # uniform
     if isinstance(angle, np.ndarray):
-      gl =  np.ones(np.shape(angle))*2./np.pi
+      gl =  np.ones(np.shape(angle))*2./np.pi/3.
     else:
-      gl = 2./np.pi
+      gl = 2./np.pi/3.
   elif arch=='k': # kuusk. had to multiply by factor below to work.
     if type(par)==tuple:
       gl = lad.kuusk_lad(angle,par[0],par[1])/4.**2*np.pi**2
@@ -295,12 +310,207 @@ def P(view, sun, arch, refl, trans):
       G(sun, arch)
   return p
 
+def dot(dir1,dir2):
+  '''The dot product of 2 sherical sets of angles such
+  as (zenith, azimuth).
+  The coordinate transformation is:
+  x = sin(zen)*cos(azi)
+  y = sin(zen)*sin(azi)
+  z = cos(zen)
+  Input: dir1 - (zenith,azimuth), dir2 - (zenith,azimuth).
+  Output: cos of the 3D angle.
+  '''
+  zen1, azi1 = (dir1[0], dir1[1])
+  zen2, azi2 = (dir2[0], dir2[1])
+  vec_v = np.array([np.sin(zen1) * np.cos(azi1), np.sin(zen1) * \
+      np.sin(azi1), np.cos(zen1)])
+  norm_v = np.linalg.norm(vec_v)
+  vec_v = vec_v / norm_v
+  vec_s = np.array([np.sin(zen2) * np.cos(azi2), np.sin(zen2) * \
+      np.sin(azi2), np.cos(zen2)])
+  norm_s = np.linalg.norm(vec_s)
+  vec_s = vec_s / norm_s
+  cos = np.dot(vec_v,vec_s)
+  return cos
+
+def Big_psi2(view, sun, leaf_ze):
+  '''A function that returns the psi kernel value for the 
+  portion of the integrand that is positive or negative 
+  as a tuple.
+  Based on Myneni (1988c) eq. (13).
+  Input: view - tuple(zenith, azimuth), sun - tuple(zenith, 
+  azimuth), leaf_ze - leaf zenith.
+  Output: psi kernel (positive, negative)
+  '''
+  def fun_pos(leaf_az, leaf_ze, view, sun):
+    leaf = (leaf_ze,leaf_az)
+    integ = dot(leaf,sun) * dot(leaf,view)
+    if integ >= 0.:
+      return integ
+    else:
+      return 0.
+  def fun_neg(leaf_az, leaf_ze, view, sun):
+    leaf = (leaf_ze,leaf_az)
+    integ = dot(leaf,sun) * dot(leaf,view)
+    if integ <= 0.:
+      return integ
+    else:
+      return 0.
+  psi_pos = sc.integrate.quad(fun_pos, 0., np.pi*2,\
+      args=(leaf_ze, view, sun))[0] / np.pi / 2.
+  psi_neg = sc.integrate.quad(fun_neg, 0., np.pi*2,\
+      args=(leaf_ze, view, sun))[0] / np.pi / 2.
+  return (psi_pos, np.abs(psi_neg))
+
+def Gamma2(view, sun, refl, trans, arch):
+  '''The two-angle Areas Scattering Phase Function.
+  Based on Myneni (1988c) eq. (12).
+  Input: view - tuple(view zenith, view azimuth), 
+  sun - tuple(sun zenith, sun azimuth), refl, trans,\
+      arch - archetype.
+  Output: 2 angle Gamma value.
+  '''
+  def fun(mu_l, view, sun, refl, trans, arch):
+    leaf_ze = np.arccos(mu_l)
+    Bp = Big_psi2(view, sun, leaf_ze)
+    integ = gl(leaf_ze, arch) * (trans * Bp[0] + refl * Bp[1])
+    return integ
+
+  g = sc.integrate.quad(fun, 0., 1., args=(view, sun, refl,\
+      trans, arch), limit=16)[0]
+  print 'integration of view zenith:%.2f is:%.4f' % (view[0], g)
+  return g
+
+def P2(view, sun, arch, refl, trans):
+  '''The two-angle Normalized Scattering Phase Function as 
+  described in Myneni 1988(c) eq (22).
+  It requires tuples/lists/arrays for the zenith and azimuth
+  angle combinations. The gaussian weight and cos(angles) 
+  need to be passes as well.
+  Input: view - (zenith, azimuth), sun - (zenith, azimuth),
+  arch - archetype, refl, trans, g_wt, mu_l.
+  Output: Normalized Scattering Phase function value.
+  '''
+#def P2(view, sun, arch, refl, trans, g_wt, mu_l):
+  '''The two-angle Normalized Scattering Phase Function as 
+  described in Myneni 1988(c) eq (22).
+  It requires tuples/lists/arrays for the zenith and azimuth
+  angle combinations. The gaussian weight and cos(angles) 
+  need to be passes as well.
+  Input: view - (zenith, azimuth), sun - (zenith, azimuth),
+  arch - archetype, refl, trans, g_wt, mu_l.
+  Output: Normalized Scattering Phase function value.
+  '''
+  '''mu_v, mu_s = np.cos((view[0],sun[0]))
+  ph_v, ph_s = (view[1],sun[1])
+  ph_l = np.pi*mu_l + np.pi
+  mid = len(mu_l)/2
+  zl = np.arccos(mu_l[:mid])
+  #pdb.set_trace()
+  DP1 = np.abs(mu_s*mu_l + np.sqrt(1.-mu_s**2) * \
+      np.sqrt(1.-mu_l**2) * np.cos(ph_s - ph_l))
+  DP2 = np.abs(mu_v*mu_l + np.sqrt(1.-mu_v**2) * \
+      np.sqrt(1.-mu_l**2) * np.cos(ph_v - ph_l)),
+  integ1 = np.sum(np.multiply(g_wt[:mid],gl(zl,arch)))
+  gl_h = 1.*g_wt # assuming that needs to be weighted.
+  DPs = np.multiply(DP1,DP2)
+  integ2 = np.sum(np.multiply(gl_h, DPs))
+  p = 2./G(sun[0],arch) * integ1 * integ2
+  return p'''
+
+def plotGamma2():
+  '''A function that plots the Gamma2 function.
+  '''
+  n = 16
+  refl = 0.5
+  trans = 0.5
+  arch = 'u'
+  view_az = np.ones(n)*0. #1st half 0 then rest pi
+  view_ze = np.linspace(0.,np.pi,n)
+  view = []
+  for a,z in zip(view_az,view_ze):
+    view.append((z,a))
+  sun_az = 0.
+  sun_ze = np.pi
+  sun = (sun_ze, sun_az)
+  g = []
+  for v in view:
+    gam = Gamma2(v, sun, refl, trans, arch)
+    g.append(gam)
+  fig, ax = plt.subplots(1)
+  plt.plot(view_ze*180/np.pi,g,'r')
+  s = '''sun zenith:%.2f, sun azimuth:%.2f,
+  view azimuth:%.2f, refl:%.2f,
+  trans:%.2f, arch:%s''' % \
+      (sun_ze*180/np.pi,sun_az*180/np.pi,\
+      view_az[0]*180/np.pi, refl, trans, arch)
+  props = dict(boxstyle='round',facecolor='wheat',alpha=0.5)
+  plt.text(.5,.5, s, bbox = props, transform=ax.transAxes,\
+      horizontalalignment='center', verticalalignment='center')
+  plt.show()
+
+
+def plotBigPsi2():
+  '''A function that plots the big psi kernel.
+  '''
+  n = 16
+  view_az = np.ones(n)*0. #1st half 0 then rest pi
+  view_ze = np.linspace(0.,np.pi,n)
+  view = []
+  for a,z in zip(view_az,view_ze):
+    view.append((z,a))
+  sun_az = 0.
+  sun_ze = np.pi
+  sun = (sun_ze, sun_az)
+  leaf_ze = 0.#np.pi/4.
+  y_pos = []
+  y_neg = []
+  for v in view:
+    pos, neg = Big_psi2(v, sun, leaf_ze)
+    y_pos.append(pos)
+    y_neg.append(neg)
+  fig, ax = plt.subplots(1)
+  plt.plot(view_ze*180/np.pi,y_pos,'r',label='trans.')
+  plt.plot(view_ze*180/np.pi,y_neg,'b',label='refl.')
+  plt.legend(loc=7)
+  s = '''sun zenith:%.2f, sun azimuth:%.2f,
+  view azimuth:%.2f, leaf zenith:%.2f''' % \
+      (sun_ze*180/np.pi,sun_az*180/np.pi,\
+      view_az[0]*180/np.pi,leaf_ze*180/np.pi)
+  props = dict(boxstyle='round',facecolor='wheat',alpha=0.5)
+  plt.text(.5,.5, s, bbox = props, transform=ax.transAxes,\
+      horizontalalignment='center', verticalalignment='center')
+  plt.show()
+
+def plotP2():
+  '''A function to plot the two-angle Normalized Scattering
+  Phase Function. 
+  Output: plot of P2 function
+  '''
+  N = 64
+  g_wt = np.array(gauss_wt[str(N)])
+  mu_l = np.array(gauss_mu[str(N)])
+  zen = np.arccos(mu_l)
+  a = 0.
+  view = []
+  for z in zen:
+    view.append((z,a))
+  sun = (180./180.*np.pi,0.)
+  arch = 'u'
+  refl = 0.5
+  trans = 0.5
+  y = []
+  for v in view:
+    y.append(P2(v, sun, arch, refl, trans, g_wt, mu_l))
+  plt.plot(mu_l,y)
+  plt.show()
+
 def plotgl():
   '''A function to plot the LAD distribution for each 
   archetype.
   Output: plots of gl functions
   '''
-  types = ['p','e','s','m','x','u','k','b']
+  types = ['p','e','s','m','x','ug','k','b']
   colors = ['g','b','+r','xy','--c','p','k','y']
   views = np.linspace(0., np.pi/2, 100)
   gf = np.zeros_like(views)
@@ -430,3 +640,4 @@ def plotBpsi():
 #plotGamma()
 #plotH()
 #plotBpsi()
+#plotP2()

@@ -10,24 +10,11 @@ import numpy as np
 import scipy as sc
 import matplotlib.pylab as plt
 import warnings
-import pickle
 import os
 from radtran import *
 import nose
 import pdb
 
-# Gaussian quadratures sets to be used in instances
-gauss_f_mu = open('lgvalues-abscissa.dat','rb')
-gauss_f_wt = open('lgvalues-weights.dat','rb')
-gauss_mu = pickle.load(gauss_f_mu)
-gauss_wt = pickle.load(gauss_f_wt)
-# sort all dictionary items
-for k in gauss_mu.keys():
-  ml = gauss_mu[k]
-  wl = gauss_wt[k]
-  ml, wl = zip(*sorted(zip(ml,wl),reverse=True))
-  gauss_mu[k] = ml
-  gauss_wt[k] = wl
 
 class rt_layers():
   '''The class that will encapsulate the data and methods to be used
