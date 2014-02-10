@@ -65,9 +65,9 @@ def gl(angle, arch, par=None):
     gl = 2./np.pi*(1. + np.cos(4.*angle))
   elif arch=='u': # uniform
     if isinstance(angle, np.ndarray):
-      gl =  np.ones(np.shape(angle))*2./np.pi/3.
+      gl =  np.ones(np.shape(angle))*2./np.pi
     else:
-      gl = 2./np.pi/3.
+      gl = 2./np.pi
   elif arch=='k': # kuusk. had to multiply by factor below to work.
     if type(par)==tuple:
       gl = lad.kuusk_lad(angle,par[0],par[1])/4.**2*np.pi**2
@@ -353,16 +353,24 @@ def Big_psi2(view, sun, leaf_ze):
     leaf = (leaf_ze,leaf_az)
     integ = dot(leaf,sun) * dot(leaf,view)
     if integ <= 0.:
-      return integ
+      return -integ
     else:
       return 0.
-  psi_pos = sc.integrate.quad(fun_pos, 0., np.pi*2,\
-      args=(leaf_ze, view, sun))[0] / np.pi / 2.
-  psi_neg = sc.integrate.quad(fun_neg, 0., np.pi*2,\
-      args=(leaf_ze, view, sun))[0] / np.pi / 2.
-  return (psi_pos, np.abs(psi_neg))
+  N = 32 # no. of leaf azimuth angles
+  ph_mu = np.array(gauss_mu[str(N)])
+  ph_wt = np.array(gauss_wt[str(N)])
+  arr_pos = []
+  arr_neg = []
+  f_mu = lambda mu: np.pi * mu + np.pi
+  for ph in ph_mu:
+    arr_pos.append(fun_pos(f_mu(ph), leaf_ze, view, sun))
+    arr_neg.append(fun_neg(f_mu(ph), leaf_ze, view, sun))
+    #pdb.set_trace()
+  psi_pos = np.pi * np.sum(np.multiply(arr_pos,ph_wt))
+  psi_neg = np.pi * np.sum(np.multiply(arr_neg,ph_wt))
+  return (psi_pos, psi_neg)
 
-def Gamma2(view, sun, refl, trans, arch):
+def Gamma2(view, sun, arch, refl, trans):
   '''The two-angle Areas Scattering Phase Function.
   Based on Myneni (1988c) eq. (12).
   Input: view - tuple(view zenith, view azimuth), 
@@ -370,15 +378,22 @@ def Gamma2(view, sun, refl, trans, arch):
       arch - archetype.
   Output: 2 angle Gamma value.
   '''
+  N = 16 # no. leaf zenith angles
+  g_mu = np.array(gauss_mu[str(N)])
+  g_wt = np.array(gauss_wt[str(N)])
   def fun(mu_l, view, sun, refl, trans, arch):
     leaf_ze = np.arccos(mu_l)
-    Bp = Big_psi2(view, sun, leaf_ze)
-    integ = gl(leaf_ze, arch) * (trans * Bp[0] + refl * Bp[1])
-    return integ
-
-  g = sc.integrate.quad(fun, 0., 1., args=(view, sun, refl,\
-      trans, arch), limit=16)[0]
-  print 'integration of view zenith:%.2f is:%.4f' % (view[0], g)
+    arr = []
+    for lz in leaf_ze:
+      Bp = Big_psi2(view, sun, lz)
+      arr.append(gl(lz, arch) * (trans * Bp[0] + refl * Bp[1]))
+    return arr
+  mu_l = g_mu[:N/2]
+  mu_w = g_wt[:N/2]
+  g = np.sum(np.multiply(fun(mu_l,view,sun,refl,trans,arch),\
+      mu_w))
+  print 'integration of view zenith & azimuth:\
+      %.2f, %.2f is:%.4f' % (view[0], view[1], g)
   return g
 
 def P2(view, sun, arch, refl, trans):
@@ -391,6 +406,10 @@ def P2(view, sun, arch, refl, trans):
   arch - archetype, refl, trans, g_wt, mu_l.
   Output: Normalized Scattering Phase function value.
   '''
+  p = 4.*Gamma2(view, sun, arch, refl, trans)/(refl+trans)/\
+      G(sun[0], arch) / np.pi
+  return p
+
 #def P2(view, sun, arch, refl, trans, g_wt, mu_l):
   '''The two-angle Normalized Scattering Phase Function as 
   described in Myneni 1988(c) eq (22).
@@ -426,7 +445,7 @@ def plotGamma2():
   trans = 0.5
   arch = 'u'
   view_az = np.ones(n)*0. #1st half 0 then rest pi
-  view_ze = np.linspace(0.,np.pi,n)
+  view_ze = np.arccos(gauss_mu[str(n)])
   view = []
   for a,z in zip(view_az,view_ze):
     view.append((z,a))
@@ -435,7 +454,7 @@ def plotGamma2():
   sun = (sun_ze, sun_az)
   g = []
   for v in view:
-    gam = Gamma2(v, sun, refl, trans, arch)
+    gam = Gamma2(v, sun, arch, refl, trans)
     g.append(gam)
   fig, ax = plt.subplots(1)
   plt.plot(view_ze*180/np.pi,g,'r')
@@ -487,22 +506,33 @@ def plotP2():
   Phase Function. 
   Output: plot of P2 function
   '''
-  N = 64
+  N = 16
   g_wt = np.array(gauss_wt[str(N)])
   mu_l = np.array(gauss_mu[str(N)])
   zen = np.arccos(mu_l)
-  a = 0.
+  a = 0.*np.pi/180. # view azimuth
   view = []
   for z in zen:
     view.append((z,a))
-  sun = (180./180.*np.pi,0.)
+  sun = (180./180.*np.pi,0./180.*np.pi) # sun zenith, azimuth
   arch = 'u'
   refl = 0.5
   trans = 0.5
   y = []
   for v in view:
-    y.append(P2(v, sun, arch, refl, trans, g_wt, mu_l))
-  plt.plot(mu_l,y)
+    y.append(P2(v, sun, arch, refl, trans))
+  fig, ax = plt.subplots(1)
+  plt.plot(mu_l,y, 'r--')
+  s = '''sun zenith:%.2f, sun azimuth:%.2f, arch:%s
+  view azimuth:%.2f, refl:%.2f, trans:%.2f''' % \
+      (sun[0]*180/np.pi,sun[1]*180/np.pi, arch,\
+      a*180/np.pi, refl, trans)
+  props = dict(boxstyle='round',facecolor='wheat',alpha=0.5)
+  plt.text(.5,.5, s, bbox = props, transform=ax.transAxes,\
+      horizontalalignment='center', verticalalignment='center')
+  plt.xlabel(r"$\mu$ (cosine of exit zenith)")
+  plt.ylabel(r"P($\Omega$, $\Omega$0)")
+  plt.title("P (Normalized Scattering Phase Function)") 
   plt.show()
 
 def plotgl():
@@ -555,7 +585,7 @@ def plotGamma():
   miny = 0.
   for trans in tr_rf:
     refl = 1. - trans
-    gam = Gamma(view=0., sun=angles, refl=refl, trans=trans, arch='e')
+    gam = P(view=0., sun=angles, refl=refl, trans=trans, arch='u')
     plt.plot(angles, gam, label=str(trans))
     maxy = max(maxy,gam.max())
     #pdb.set_trace()
