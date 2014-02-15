@@ -392,8 +392,8 @@ def Gamma2(view, sun, arch, refl, trans):
   mu_w = g_wt[:N/2]
   g = np.sum(np.multiply(fun(mu_l,view,sun,refl,trans,arch),\
       mu_w))
-  print 'integration of view zenith & azimuth:\
-      %.2f, %.2f is:%.4f' % (view[0], view[1], g)
+  #print 'integration of view zenith & azimuth:\
+  #    %.2f, %.2f is:%.4f' % (view[0], view[1], g)
   return g
 
 def P2(view, sun, arch, refl, trans):
@@ -406,10 +406,26 @@ def P2(view, sun, arch, refl, trans):
   arch - archetype, refl, trans, g_wt, mu_l.
   Output: Normalized Scattering Phase function value.
   '''
+  # a factor for each archetype due to integration error.
+  if arch == 'u':
+    fact = 1./np.pi
+  elif arch == 's':
+    fact = 3./4./np.pi
+  elif arch == 'p':
+    fact = 4./3./np.pi
+  elif arch == 'e':
+    fact = 2./3./np.pi
+  elif arch == 'm':
+    fact = 4./5./np.pi
+  elif arch == 'x':
+    fact = 25./18./np.pi
+  else:
+    raise Exception('IncorrectArchetype')
   p = 4.*Gamma2(view, sun, arch, refl, trans)/(refl+trans)/\
-      G(sun[0], arch) / np.pi
+      G(sun[0], arch) * fact 
   return p
 
+# an older version of P2 below. not good results.
 #def P2(view, sun, arch, refl, trans, g_wt, mu_l):
   '''The two-angle Normalized Scattering Phase Function as 
   described in Myneni 1988(c) eq (22).
@@ -510,12 +526,12 @@ def plotP2():
   g_wt = np.array(gauss_wt[str(N)])
   mu_l = np.array(gauss_mu[str(N)])
   zen = np.arccos(mu_l)
-  a = 0.*np.pi/180. # view azimuth
+  a = 42.7*np.pi/180. # view azimuth
   view = []
   for z in zen:
     view.append((z,a))
-  sun = (180./180.*np.pi,0./180.*np.pi) # sun zenith, azimuth
-  arch = 'u'
+  sun = (100./180.*np.pi,0./180.*np.pi) # sun zenith, azimuth
+  arch = 'm'
   refl = 0.5
   trans = 0.5
   y = []

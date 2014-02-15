@@ -53,6 +53,8 @@ def test_P2():
   np.testing.assert_almost_equal(err, 0.0, decimal=2)
   #return p2
 
+# impliment a version for the P() one angle version.
+
 def test_gl():
   '''A function to test to integration of the leaf angle 
   distribution function gl() between 0 and pi/2 is unity.
