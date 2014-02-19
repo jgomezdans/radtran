@@ -31,8 +31,8 @@ class rt_layers():
   '''
 
 
-  def __init__(self, Tol = 1.e-3, Iter = 200, K = 40, N = 16,\
-      Lc = 4., refl = 0.475, trans = 0.475, refl_s = 0.2, I0 = 1.,\
+  def __init__(self, Tol = 1.e-6, Iter = 200, K = 20, N = 16,\
+      Lc = 4., refl = 0.175, trans = 0.175, refl_s = 1.e-7, I0 = 1.,\
       sun0 = 180., arch = 's'):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
@@ -92,19 +92,16 @@ class rt_layers():
 
  
   # function to search angle database for index
-  def angle_search(self,v,up=False):
+  def angle_search(self,v):
     '''A method that provides the index of an angle in the
     views array. If up is True then provides the index 
     relative to the start of the array for upward angles,
     if False then it's relative to the middle or down
     direction.
-    Input: v - angle to search, up - True/False.
+    Input: v - angle to search.
     Output: index of angle in views array.
     '''
-    if not up:
-      index = np.where(np.abs(self.views-v)<=1.0e-6)[0][0]
-    else:
-      index = np.where(np.abs(self.views[:self.n]-v)<=1.0e-6)[0][0]
+    index = np.where(np.abs(self.views-v)<=1.0e-6)[0][0]
     return index
 
   def sun0(self,sun0):
@@ -152,7 +149,7 @@ class rt_layers():
     Ir = np.multiply(np.cos(self.views[self.n:]),\
         self.Inodes[self.K-1,2,self.n:])
     self.Inodes[self.K-1,2,:self.n] = - 2. * self.refl_s * \
-        np.sum(Ir*self.gauss_wt[self.n:]) 
+        np.sum(np.multiply(Ir,self.gauss_wt[self.n:])) 
 
   def converge(self):
     '''Check for convergence and returns true if converges.
@@ -161,8 +158,8 @@ class rt_layers():
         self.Inodes[0,0])
     misclose_bot = np.abs((self.Inodes[self.K-1,2] - \
         self.Bounds[1])/self.Inodes[self.K-1,2])
-    max_top = max(misclose_top)
-    max_bot = max(misclose_bot)
+    max_top = np.nanmax(misclose_top)
+    max_bot = np.nanmax(misclose_bot)
     print 'misclosures top: %.g, and bottom: %.g.' %\
         (max_top, max_bot)
     #pdb.set_trace()
@@ -200,13 +197,14 @@ class rt_layers():
           self.Jnodes[k,j] = self.J(v,self.views,self.Inodes[k,1])
       # acceleration can be implimented here...
       # check for convergence
-      print self.Inodes[0,0]
+      #print self.Inodes[0,0]
       print 'iteration no: %d completed.' % (i+1)
       if self.converge():
         I_TOC = (self.Inodes[0,0,:self.n] + \
             self.Q2nodes[0,:self.n]) / -self.mu_s
         I_soil = (self.Inodes[self.K-1,2,self.n:] + \
-            self.I_f(self.sun0,self.Lc,self.I0)) / -self.mu_s
+            self.I_f(self.sun0,self.Lc,self.I0))\
+            / -self.mu_s * (1. - self.refl_s) 
         self.I_top_bottom = np.append(I_TOC,I_soil)
         print 'solution at iteration %d and saved in class.Inodes.'\
             % (i+1)
@@ -266,10 +264,9 @@ class rt_layers():
     # expected that sun is a list of all incomming illumination
     # angles.
     index_view = self.angle_search(view)
-    index_sun = self.angle_search(sun)
     if isinstance(sun, np.ndarray) and isinstance(Ia, np.ndarray):
-      integ1 = np.multiply(Ia,self.Px[index_view,index_sun])
-      integ = np.multiply(integ1,self.Gx[index_sun]/\
+      integ1 = np.multiply(Ia,self.Px[index_view])
+      integ = np.multiply(integ1,self.Gx/\
           self.Gx[index_view])
       # element-by-element multiplication
       # numerical integration by gaussian qaudrature
@@ -304,13 +301,12 @@ class rt_layers():
     Output: The Q2 term.
     '''
     index_view = self.angle_search(view)
-    index_sun = self.angle_search(self.sun_up,up=True)
     dL = self.Lc - L
-    integ1 = np.multiply(self.Px[index_view,index_sun],\
-        self.Gs/self.Gx[index_view]) 
+    integ1 = np.multiply(self.Px[index_view,:self.n],\
+        self.Gx[:self.n]/self.Gx[index_view]) 
         # element-by-element multipl.
     integ = np.multiply(integ1, self.I_f(self.sun_up, -dL, 1.)) # ^^
-    q = self.albedo / 4. * -2. * self.refl_s * self.mu_s * \
+    q = self.albedo / 4. * -2.* self.refl_s * self.mu_s * \
         self.I_f(self.sun0, self.Lc, self.I0) * \
         np.sum(integ*self.gauss_wt[:self.n]) 
         # numerical integration by gaussian quadrature
@@ -324,11 +320,8 @@ class rt_layers():
     '''
     c_refl = np.sum(self.I_top_bottom[:self.n]*\
         self.gauss_wt[:self.n])
-    down = np.sum(self.I_top_bottom[self.n:]*\
+    s_abs = np.sum(self.I_top_bottom[self.n:]*\
         self.gauss_wt[self.n:])
-    up = np.sum(self.Inodes[self.K-1,2,:self.n]*\
-        self.gauss_wt[:self.n])/-self.mu_s
-    s_abs = down - up
     c_abs = self.I0 - c_refl - s_abs
     return (c_refl,s_abs,c_abs)
 
@@ -401,7 +394,8 @@ def plot_brf(obj):
   Output: plot of scattering.
   '''
   views = np.cos(obj.views)
-  brf = obj.I_top_bottom
+  brf = obj.I_top_bottom.copy()
+  brf[obj.n:] = brf[obj.n:] / (1. - obj.refl_s)
   fig, ax = plt.subplots(1)
   plt.plot(views,brf,'ro',label='BRF')
   plt.title("BRF at top and bottom node")

@@ -9,10 +9,14 @@ which holds all the functions required for the calculations.
 import numpy as np
 import scipy as sc
 import matplotlib.pylab as plt
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.mlab import griddata
+import matplotlib.tri as tri
 import warnings
 import os
 from radtran import *
 import nose
+from progressbar import *
 import pdb
 
 
@@ -25,14 +29,14 @@ class rt_layers():
   Input: Tol - max tolerance, Iter - max iterations, N - no of 
   discrete ordinates over 0 to pi, K - no of nodes, Lc - total LAI, 
   refl - leaf reflectance, trans - leaf transmittance, refl_s - 
-  soil reflectance, I0 - Downward flux at TOC, Beta - fraction of 
+  soil reflectance, F - total flux incident at TOC, Beta - fraction of 
   direct solar illumination, sun0_zen - zenith angle of solar illumination.
   Ouput: a rt_layers class.
   '''
 
-  def __init__(self, Tol = 1.e-3, Iter = 200, K = 40, N = 16,\
-      Lc = 4., refl = 0.475, trans = 0.475, refl_s = 0.2, I0 = 1.,\
-      Beta=1., sun0_zen = 180., sun0_azi = 0., arch = 's'):
+  def __init__(self, Tol = 1.e-6, Iter = 200, K = 20, N = 4,\
+      Lc = 4., refl = 0.175, trans = 0.175, refl_s = 1.e-7, F = np.pi,\
+      Beta=.99, sun0_zen = 180., sun0_azi = 0., arch = 's'):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
     '''
@@ -47,25 +51,41 @@ class rt_layers():
     self.refl = refl
     self.trans = trans
     self.refl_s = refl_s
-    self.I0 = I0
     self.Beta = Beta
     self.sun0_zen = sun0_zen * np.pi / 180.
-    self.sun0_azi = self.sun0_azi * np.pi / 180.
+    self.sun0_azi = sun0_azi * np.pi / 180.
+    self.sun0 = np.array([self.sun0_zen, self.sun0_azi])
     self.mu_s = np.cos(self.sun0_zen)
+    self.I0 = Beta * F / np.pi # did not include mu_s here. 
+    # it is assumed that illumination at TOC will be provided prior.
+    self.Id = (1. - Beta) * F / np.pi
     self.arch = arch
     self.albedo = self.refl + self.trans # leaf single scattering albedo
-    self.gauss_wt = np.array(gauss_wt[str(N)])
-    self.gauss_mu = np.array(gauss_mu[str(N)])
+    f = open('quad_dict.dat')
+    quad_dict = pickle.load(f)
+    f.close()
+    #pdb.set_trace()
+    quad = quad_dict[str(N)]
+    self.gauss_wt = quad[:,2] / 8.# ??? #np.array(gauss_wt[str(N)])
+    self.gauss_mu = np.cos(quad[:,0]) #np.array(gauss_mu[str(N)])
+    self.views = np.array(zip(quad[:,0],quad[:,1]))
 
     # intervals
     dk = Lc/K
     self.mid_ks = np.arange(dk/2.,Lc,dk)
-    self.n = self.N/2
+    self.n = N*(N + 2) # self.N/2 # needs to be mid of angle pairs
     
     # node arrays and boundary arrays
-    self.views_zen = np.arccos(self.gauss_mu)
-    self.views_azi = self.views_zen.copy()*2. # I assume...
-    self.sun_up = self.views_zen[:self.n]
+    self.views_zen = quad[:,0]
+    self.views_azi = quad[:,1]
+    self.sun_up = self.views[:self.n/2]
+    self.sun_down = self.views[self.n/2:]
+    self.Ird = np.sum(np.multiply(self.refl_s * 2. * \
+        np.multiply(self.gauss_mu[self.n/2:],\
+        self.I_f(self.sun_down, self.Lc, self.Id)),\
+        self.gauss_wt[self.n/2:]))
+    self.Ir0 = self.refl_s * self.mu_s * \
+        self.I_f(self.sun0, self.Lc, self.I0)
     # discrete ordinate equations
     g = G(self.views_zen,self.arch)
     mu = self.gauss_mu 
@@ -75,26 +95,49 @@ class rt_layers():
     # G-function cross-sections
     self.Gx = g
     self.Gs = G(self.sun0_zen,arch)
-    self.Inodes = np.zeros((K,3,N)) # K, upper-mid-lower, N
-    self.Jnodes = np.zeros((K,N))
+    self.Inodes = np.zeros((K,3,self.n)) # K, upper-mid-lower, N
+    self.Jnodes = np.zeros((K,self.n))
     self.Q1nodes = self.Jnodes.copy()
     self.Q2nodes = self.Jnodes.copy()
-    self.Px = np.zeros((N)) # P cross-section array
-    self.Ps = np.zeros(N)
-    for (i,v) in enumerate(self.views_zen):
-      self.Ps[i] = P(v,self.sun0_zen,self.arch,self.refl,\
+    self.Q3nodes = self.Jnodes.copy()
+    self.Q4nodes = self.Jnodes.copy()
+    self.Px = np.zeros((self.n,self.n)) # P cross-section array
+    self.Ps = np.zeros(self.n)
+    # a litte progress bar for long calcs
+    widgets = ['Progress: ', Percentage(), ' ', \
+      Bar(marker='0',left='[',right=']'), ' ', ETA()] #see docs for other options
+    maxval = np.shape(self.views)[0] * (np.shape(self.mid_ks)[0] + \
+        np.shape(self.views)[0] + 1) + 1
+    pbar = ProgressBar(widgets=widgets, maxval = maxval)
+    count = 0
+    print 'Setting-up Phase and Q term arrays....'
+    pbar.start()
+    for (i,v) in enumerate(self.views):
+      count += 1
+      pbar.update(count)
+      self.Ps[i] = P2(v,self.sun0,self.arch,self.refl,\
         self.trans)
-    for (i,v) in enumerate(self.views_zen):
-      self.Px[i] = P(v, self.views_zen,self.arch,self.refl,self.trans)
+    for (i,v1) in enumerate(self.views):
+      for (j,v2) in enumerate(self.views):
+        count += 1
+        pbar.update(count)
+        self.Px[i,j] = P2(v1, v2 ,self.arch, self.refl, self.trans)
     for (i, k) in enumerate(self.mid_ks):
-      for (j, v) in enumerate(self.views_zen):
+      for (j, v) in enumerate(self.views):
+        count += 1
+        pbar.update(count)
         self.Q1nodes[i,j] = self.Q1(v,k) 
         self.Q2nodes[i,j] = self.Q2(v,k)
-    self.Bounds = np.zeros((2,N))
+        self.Q3nodes[i,j] = self.Q3(v,k)
+        self.Q4nodes[i,j] = self.Q4(v,k)
+    pbar.finish()
+    self.Bounds = np.zeros((2,self.n))
+    os.system('play --no-show-progress --null --channels 1 \
+            synth %s sine %f' % ( 0.5, 500)) # ring the bell
 
  
   # function to search angle database for index
-  def angle_search(self,v,up=False):
+  def angle_search(self,v):
     '''A method that provides the index of an angle in the
     views array. If up is True then provides the index 
     relative to the start of the array for upward angles,
@@ -103,11 +146,9 @@ class rt_layers():
     Input: v - angle to search, up - True/False.
     Output: index of angle in views array.
     '''
-    if not up:
-      index = np.where(np.abs(self.views_zen-v)<=1.0e-6)[0][0]
-    else:
-      index = np.where(np.abs(self.views_zen[:self.n]-v)<=1.0e-6)[0][0]
-    return index
+    for i, view in enumerate(self.views):
+      if np.max(np.abs(v - view)) < 1.e-5:
+        return i
 
   def sun0_zen(self,sun0_zen):
     '''Method used for entering solar insolation angle which
@@ -121,10 +162,11 @@ class rt_layers():
   def I_down(self, k):
     '''The discrete ordinate downward equation.
     '''
-    n = self.n
+    n = self.n/2
     self.Inodes[k,2,n:] = self.a[n:]*self.Inodes[k,0,n:] - \
         self.c[n:]*(self.Jnodes[k,n:] + self.Q1nodes[k,n:] + \
-        self.Q2nodes[k,n:])
+        self.Q2nodes[k,n:] + self.Q3nodes[k,n:] + \
+        self.Q4nodes[k,n:])
     if min(self.Inodes[k,2,n:]) < 0.:
       self.Inodes[k,2,n:] = np.where(self.Inodes[k,2,n:] < 0., \
         0., self.Inodes[k,2,n:]) # negative fixup need to revise....
@@ -136,10 +178,11 @@ class rt_layers():
   def I_up(self, k):
     '''The discrete ordinate upward equation.
     '''
-    n = self.n
+    n = self.n/2
     self.Inodes[k,0,:n] = 1./self.a[:n]*self.Inodes[k,2,:n] + \
         self.b[:n]*(self.Jnodes[k,:n] + self.Q1nodes[k,:n] + \
-        self.Q2nodes[k,:n])
+        self.Q2nodes[k,:n] + self.Q3nodes[k,:n] + \
+        self.Q4nodes[k,:n])
     if min(self.Inodes[k,0,:n]) < 0.:
       self.Inodes[k,0,:n] = np.where(self.Inodes[k,0,:n] < 0., \
          0., self.Inodes[k,0,:n]) # negative fixup need to revise...
@@ -151,10 +194,10 @@ class rt_layers():
   def reverse(self):
     '''Reverses the transmissivity at soil boundary.
     '''
-    Ir = np.multiply(np.cos(self.views_zen[self.n:]),\
-        self.Inodes[self.K-1,2,self.n:])
-    self.Inodes[self.K-1,2,:self.n] = - 2. * self.refl_s * \
-        np.sum(Ir*self.gauss_wt[self.n:]) 
+    Ir = np.multiply(np.cos(self.views[self.n/2:,0]),\
+        self.Inodes[self.K-1,2,self.n/2:])
+    self.Inodes[self.K-1,2,:self.n/2] = - 2. * self.refl_s * \
+        np.sum(np.multiply(Ir,self.gauss_wt[self.n/2:]))
 
   def converge(self):
     '''Check for convergence and returns true if converges.
@@ -163,11 +206,10 @@ class rt_layers():
         self.Inodes[0,0])
     misclose_bot = np.abs((self.Inodes[self.K-1,2] - \
         self.Bounds[1])/self.Inodes[self.K-1,2])
-    max_top = max(misclose_top)
-    max_bot = max(misclose_bot)
+    max_top = np.nanmax(misclose_top)
+    max_bot = np.nanmax(misclose_bot)
     print 'misclosures top: %.g, and bottom: %.g.' %\
         (max_top, max_bot)
-    #pdb.set_trace()
     if max_top  <= self.Tol and max_bot <= self.Tol:
       return True
     else:
@@ -177,8 +219,8 @@ class rt_layers():
     '''The solver. Run this as a method of the instance of the
     rt_layers class to solve the RT equations. You first need
     to create an instance of the class though using:
-    eg. test = rt_layers() # see rt_layers for more options.
-    then test.solve().
+    eg. test = rt_layers() # see rt_layers ? for more options.
+    then run test.solve().
     Input: none.
     Output: the fluxes at discrete ordinates and nodes.
     '''
@@ -198,22 +240,24 @@ class rt_layers():
       # compute I_k+1/2 and J_k+1/2
       for k in range(self.K):
         self.Inodes[k,1] = (self.Inodes[k,0] + self.Inodes[k,2])/2.
-        for j, v in enumerate(self.views_zen):
-          self.Jnodes[k,j] = self.J(v,self.views_zen,self.Inodes[k,1])
+        for j, v in enumerate(self.views):
+          self.Jnodes[k,j] = self.J(v,self.Inodes[k,1])
       # acceleration can be implimented here...
       # check for convergence
-      print self.Inodes[0,0]
+      #print self.Inodes[0,0]
       print 'iteration no: %d completed.' % (i+1)
       if self.converge():
-        I_TOC = (self.Inodes[0,0,:self.n] + \
-            self.Q2nodes[0,:self.n]) / -self.mu_s
-        I_soil = (self.Inodes[self.K-1,2,self.n:] + \
-            self.I_f(self.sun0_zen,self.Lc,self.I0)) / -self.mu_s
+        I_TOC = (self.Inodes[0,0,:self.n/2] + \
+            self.Q3nodes[0,:self.n/2] + self.Q4nodes[0,:self.n/2])\
+            / -self.mu_s
+        I_soil = (self.Inodes[self.K-1,2,self.n/2:] + \
+            self.I_f(self.sun0,self.Lc,self.I0))\
+            / -self.mu_s * (1. - self.refl_s) # needs diff term here.
         self.I_top_bottom = np.append(I_TOC,I_soil)
         print 'solution at iteration %d and saved in class.Inodes.'\
             % (i+1)
-        #os.system('play --no-show-progress --null --channels 1 \
-        #    synth %s sine %f' % ( 0.5, 500)) # ring the bell
+        os.system('play --no-show-progress --null --channels 1 \
+            synth %s sine %f' % ( 0.5, 500)) # ring the bell
         print 'TOC (up) and soil (down) fluxe array:'
         return self.I_top_bottom
         break
@@ -233,13 +277,15 @@ class rt_layers():
     instance of the class.
     '''
     return '''Tol = %.e, Iter = %i, K = %i, N = %i, 
-    Lc = %.3f, refl = %.3f, trans = %.3f, 
-    refl_s = %.3f, I0 = %.4f,
-    sun0_zen = %.3f, arch = %s''' % (self.Tol, self.Iter, self.K, \
-        self.N, self.Lc, self.refl, self.trans, self.refl_s, \
-        self.I0, self.sun0_zen*180./np.pi, self.arch)
+    Beta = %.3f, Lc = %.3f, refl = %.3f, trans = %.3f, 
+    refl_s = %.3f, F = %.4f, sun0_zen = %.3f, 
+    sun0_azi = %.3f, arch = %s''' \
+        % (self.Tol, self.Iter, self.K, self.N, self.Beta,\
+        self.Lc, self.refl, self.trans, self.refl_s, \
+        self.F, self.sun0[0]*180./np.pi, self.sun0[1]*180./np.pi,\
+        self.arch)
 
-  def I_f(self, angle, L, I):
+  def I_f(self, view, L, I):
     '''A function that will operate as the Beer's law exponential 
     formula. It requires the angle in radians, the 
     optical depth or LAI, and the initial intensity or flux. The
@@ -251,11 +297,15 @@ class rt_layers():
     radtran.py).
     Output: the intensity or flux at L.
     '''
+    if np.size(view) > 2:
+      angle = view[:,0]
+    else:
+      angle = view[0]
     mu = np.cos(angle)
     i =  I * np.exp(G(angle,self.arch)*L/mu)
     return i
 
-  def J(self, view, sun, Ia):
+  def J(self, view, Ia):
     '''The J or Distributed Source Term according to Myneni 1988b
     (23). This gives the multiple scattering as opposed to First 
     Collision term Q.
@@ -268,10 +318,9 @@ class rt_layers():
     # expected that sun is a list of all incomming illumination
     # angles.
     index_view = self.angle_search(view)
-    index_sun = self.angle_search(sun)
-    if isinstance(sun, np.ndarray) and isinstance(Ia, np.ndarray):
-      integ1 = np.multiply(Ia,self.Px[index_view,index_sun])
-      integ = np.multiply(integ1,self.Gx[index_sun]/\
+    if isinstance(Ia, np.ndarray):
+      integ1 = np.multiply(Ia,self.Px[index_view])
+      integ = np.multiply(integ1,self.Gx/\
           self.Gx[index_view])
       # element-by-element multiplication
       # numerical integration by gaussian qaudrature
@@ -282,40 +331,69 @@ class rt_layers():
 
   def Q1(self, view, L):
     '''The Q1 First First Collision Source Term as defined in Myneni
-    1988b (24). This is the downwelling part of the Q term. 
+    1988d (16). This is the downwelling direct part of the Q term. 
     Input: view - the zenith angle of evaluation, sun0_zen - the uncollided
     illumination zenith angle, arch - archetype, refl - reflectance, 
     trans - transmittance, L - LAI, I0 - flux or intensity at TOC.
     Ouput: The Q1 term.
     '''
     index_view = self.angle_search(view)
-    I = self.I_f(self.sun0_zen, L, self.I0)
+    I = self.I_f(self.sun0, L, self.I0)
     q = self.albedo / 4. * self.Ps[index_view] * self.Gs/\
         self.Gx[index_view] * I
     return q
 
   def Q2(self, view, L):
     '''The Q2 Second First Collision Source Term as defined in
-    Myneni 1988b (24). This is the upwelling part of the Q term.
+    Myneni 1988d (17). This is the downwelling diffuse part of 
+    the Q term.
+    Input:
+    Output:
+    '''
+    index_view = self.angle_search(view)
+    integ1 = np.multiply(self.Px[index_view,self.n/2:],\
+        self.Gx[self.n/2:]/self.Gx[index_view])
+    integ = np.multiply(integ1, self.I_f(self.sun_down, L, \
+        self.Id))
+    q = self.albedo / 4. * np.sum(np.multiply(integ,\
+        self.gauss_wt[self.n/2:]))
+    return q
+
+  def Q3(self, view, L): 
+    '''The Q3 Third First Collision Source Term as defined in
+    Myneni 1988d (18). This is the upwelling direct part of 
+    the Q term.
     Input: view - the view zenith angle of evalution, sun0_zen - the 
     direct illumination zenith angle down, n_angles - the number of
     angles between 0 and pi, arch - archetype, refl - 
     reflectance, trans - transmittance, Lc - total LAI, L - LAI,
     I0 - flux or intensity of direct sun ray at TOC, refl_s - 
     soil reflectance.
-    Output: The Q2 term.
+    Output: The Q3 term.
     '''
     index_view = self.angle_search(view)
-    index_sun = self.angle_search(self.sun_up,up=True)
     dL = self.Lc - L
-    integ1 = np.multiply(self.Px[index_view,index_sun],\
-        self.Gs/self.Gx[index_view]) 
+    integ1 = np.multiply(self.Px[index_view,:self.n/2],\
+        self.Gx[:self.n/2]/self.Gx[index_view]) 
         # element-by-element multipl.
-    integ = np.multiply(integ1, self.I_f(self.sun_up, -dL, 1.)) # ^^
-    q = self.albedo / 4. * -2. * self.refl_s * self.mu_s * \
-        self.I_f(self.sun0_zen, self.Lc, self.I0) * \
-        np.sum(integ*self.gauss_wt[:self.n]) 
+    integ = np.multiply(integ1, self.I_f(self.sun_up, -dL,\
+        self.Ir0)) # ^^
+    q = self.albedo / 4. * np.sum(np.multiply(integ, \
+        self.gauss_wt[:self.n/2]))
         # numerical integration by gaussian quadrature
+    return q
+
+  def Q4(self, view, L):
+    '''placeholder
+    '''
+    index_view = self.angle_search(view)
+    dL = self.Lc - L
+    integ1 = np.multiply(self.Px[index_view,:self.n/2],\
+        self.Gx[:self.n/2]/self.Gx[index_view])
+    integ = np.multiply(integ1, self.I_f(self.sun_up, -dL,\
+        self.Ird))
+    q = self.albedo / 4. * np.sum(np.multiply(integ, \
+        self.gauss_wt[:self.n/2]))
     return q
     
   def Scalar_flux(self):
@@ -324,15 +402,65 @@ class rt_layers():
     Input: none.
     Output: canopy refl, soil absorp, canopy absorp.
     '''
-    c_refl = np.sum(self.I_top_bottom[:self.n]*\
-        self.gauss_wt[:self.n])
-    down = np.sum(self.I_top_bottom[self.n:]*\
-        self.gauss_wt[self.n:])
-    up = np.sum(self.Inodes[self.K-1,2,:self.n]*\
-        self.gauss_wt[:self.n])/-self.mu_s
-    s_abs = down - up
-    c_abs = self.I0 - c_refl - s_abs
+    c_refl = np.sum(self.I_top_bottom[:self.n/2]*\
+        self.gauss_wt[:self.n/2]) * 2.
+    s_abs = np.sum(self.I_top_bottom[self.n/2:]*\
+        self.gauss_wt[self.n/2:]) * 2.
+    c_abs = self.I0 + self.Id - c_refl - s_abs
     return (c_refl,s_abs,c_abs)
+
+def plot_sphere(obj):
+  '''A function that plots the full BRF over the upper and lower
+  hemispheres. 
+  Input: rt_layers object.
+  Output: spherical plot of brf.
+  '''
+  fig = plt.figure()
+  ax = fig.add_subplot(111, projection='3d')
+  z = np.cos(obj.views[:,0])
+  x = np.cos(obj.views[:,1]) * np.sqrt(1. - z**2)
+  y = np.sin(obj.views[:,1]) * np.sqrt(1. - z**2)
+  c = obj.I_top_bottom
+  scat = ax.scatter(x, y, z, c=c)
+  ax.set_xlabel('X axis')
+  ax.set_ylabel('Y axis')
+  ax.set_zlabel('Z axis')
+  plt.title('BRF over the sphere')
+  plt.colorbar(scat, shrink=0.5, aspect=10)
+  plt.show()
+
+def plot_contours(obj):
+  '''A function that plots the BRF as an azimuthal projection
+  with contours over the TOC and soil.
+  Input: rt_layers object.
+  Output: contour plot of brf.
+  '''
+  #fix projection to azimuthal and cmap to same interval
+  z = np.cos(obj.views[:,0]) 
+  x = np.cos(obj.views[:,1]) * np.sqrt(1. - z**2) 
+  y = np.sin(obj.views[:,1]) * np.sqrt(1. - z**2)
+  z = obj.I_top_bottom
+  xt = x[:obj.n/2]
+  yt = y[:obj.n/2]
+  zt = z[:obj.n/2]
+  xb = x[obj.n/2:]
+  yb = y[obj.n/2:]
+  zb = z[obj.n/2:]
+  xi = np.linspace(-np.pi/2.,np.pi/2.,30)
+  yi = xi.copy()
+  plt.subplot(121)
+  triang = tri.Triangulation(xt, yt)
+  plt.gca().set_aspect('equal')
+  plt.tricontourf(triang, zt)
+  plt.colorbar(shrink=0.5, aspect=10)
+  plt.title('TOC BRF')
+  plt.subplot(122)
+  plt.gca().set_aspect('equal')
+  plt.tricontourf(triang, zb)
+  plt.colorbar(shrink=0.5, aspect=10)
+  plt.title('soil BRF')
+  plt.show()
+
 
 def plot_J(obj):
   '''A function that plots the J function.
@@ -369,30 +497,30 @@ def plot_Q1(obj,L):
   plt.plot(view,q,'--r')
   plt.show()
 
-def plot_Q2(obj, L):
-  '''A function that plots the Q2 function. To be noted is that
+def plot_Q3(obj, L):
+  '''A function that plots the Q3 function. To be noted is that
   this is the upwelling component of the first collision term Q.
   The graph would then portray greater scattering in the lower
   half towards view angles pi/2 to pi for the typical scenarios.
   Input: obj - instance of rt_layer object, L.
-  Ouput: Q2 term.
+  Ouput: Q3 term.
   '''
   view = np.linspace(0.,np.pi,obj.N)
   q = []
   for v in view:
-    q.append(obj.Q2(v, L))
+    q.append(obj.Q3(v, L))
   plt.plot(view,q,'--r')
   plt.show()
 
 def plot_Q(obj,L):
-  '''A function that plots the Q function as sum of Q1 and Q2.
+  '''A function that plots the Q function as sum of Q1 and Q3.
 
   '''
   view = np.linspace(0.,np.pi,obj.N)
   q = []
   for v in view:
     q.append(obj.Q1(v, L)+\
-          obj.Q2(v, L))
+          obj.Q3(v, L))
     plt.plot(view,q,'--r')
     plt.show()
 

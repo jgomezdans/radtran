@@ -530,8 +530,8 @@ def plotP2():
   view = []
   for z in zen:
     view.append((z,a))
-  sun = (100./180.*np.pi,0./180.*np.pi) # sun zenith, azimuth
-  arch = 'm'
+  sun = (180./180.*np.pi,0./180.*np.pi) # sun zenith, azimuth
+  arch = 'u'
   refl = 0.5
   trans = 0.5
   y = []
