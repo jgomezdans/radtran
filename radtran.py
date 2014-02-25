@@ -1,11 +1,10 @@
 #!/usr/bin/python
 
-'''This will turn out to be the library for all the functions
+'''This is the library for all the reusable functions that are
 necessary in our implimentation of the Radiative Transfer of 
-radiation through a canopy. Classes may be implimented when 
-deemed beneficial. Need to include a specular component as 
-described in Knyazikhin 2004 paper. 
-This will require non-rotational invariant information.
+radiation through a canopy. Classes are implimented in modules 
+such as one_angle.py and two_angle which include the remainder 
+of the funstions such as the J and Q terms.
 '''
 
 import numpy as np
@@ -18,7 +17,13 @@ import pickle
 import leaf_angle_distributions as lad
 import pdb
 
-# Gaussian quadratures sets to be used in instances
+# Gaussian quadratures sets used in integration of one dimensional
+# equations. A level-symmetric quadrature set is used in the
+# two_angle.py module for the case where integration is required
+# over a sphere as opposed to the over one dimension.
+# A full gaussian quadrature set was created and saved as a 
+# absicissa and weight dictionary file.
+
 gauss_f_mu = open('lgvalues-abscissa.dat','rb')
 gauss_f_wt = open('lgvalues-weights.dat','rb')
 gauss_mu = pickle.load(gauss_f_mu)
@@ -31,6 +36,9 @@ for k in gauss_mu.keys():
   gauss_mu[k] = ml
   gauss_wt[k] = wl
 
+# H-function LUT was created using the H_LUT.py script, which is
+# used instead of the H function. The need for the LUT was due to
+# discontinuities in the original H-function by Myneni (1989).
 lut = np.loadtxt('H_LUT.csv', delimiter=',')
 
 def gl(angle, arch, par=None):
@@ -44,12 +52,15 @@ def gl(angle, arch, par=None):
   Bunnik 1978 and others.
   Added additional distributions provided by J. Gomez-
   Dans. These are: Kuusk (1995) and Campbell (1990)
-  distributions. See the lad module for details.
+  distributions. See the lad module for details. These have
+  not been tested.
+  ---------------------------------------------------------
   Input: angle - leaf normal angle in radians,
     arch - archetype ie. 'p'-planophile, 'e'-erectophile, 
     's'-spherical/random, 'm'-plagiophile, 'x'-extremophile,
     'u'-uniform, 'k'-kuusk, 'b'-campbell, par - tuple of
-    parameters for the kuusk and campbell distributions.
+    additional parameters for the kuusk and campbell 
+    distributions.
   Output: g value at angle
   '''
   #angle = np.abs(angle)
@@ -83,20 +94,25 @@ def gl(angle, arch, par=None):
   return gl
 
 def psi(angle, view):
-  '''The kernel which replaces the azimuth dependence
-  of the double integral based on the Myneni III.13.
+  '''Used in the G-projection function as the kernel which replaces 
+  the azimuth dependence of the double integral based on the 
+  Myneni III.13.
+  ----------------------------------------------------------------
   Input: angle - the leaf zenith angle in radians,
   view - the view zenith angle in radians.
-  Output: The kernel.
+  Output: The psi kernel.
   '''
-  with warnings.catch_warnings(): # the will only work in single thread app
+  with warnings.catch_warnings(): 
+    # the will only work in single thread app
     warnings.simplefilter("ignore")
     temp = 1./np.tan(angle)/np.tan(view) # inf at angle = 0.
-    ctns = np.abs(temp) # value used to check for inf below so ignore warning
+    ctns = np.abs(temp) 
+    # value used to check for inf below so ignore warning
     phit = np.arccos(-temp)
   psiv = np.where(ctns>1., np.abs(np.cos(view)*np.cos(angle)),\
       np.cos(angle)*np.cos(view)*(2.*phit/np.pi - 1.) + 2./np.pi*\
-      np.sqrt(1. - np.cos(angle)**2)*np.sqrt(1. - np.cos(view)**2)*np.sin(phit))
+      np.sqrt(1. - np.cos(angle)**2)*np.sqrt(1. - np.cos(view)**2)\
+      *np.sin(phit))
   return psiv
 
 def G(view, arch):
@@ -104,24 +120,34 @@ def G(view, arch):
   direction based on Myneni III.16. The projection of 1 unit 
   area of leaves within a unit volume onto the plane perpen-
   dicular to the view or solar direction.
+  ------------------------------------------------------------
   Input: view - the view or solar zenith angle in radians, 
     arch - archetype, see gl function for description of each.
   Output: The integral of the Geometry function (G).
   '''
-  #pdb.set_trace()
   g = lambda angle, view, arch: gl(angle, arch)\
       *psi(angle,view) # the G function as defined in Myneni III.16.
   if isinstance(view, np.ndarray):
+    if arch == 's': # avoid integration in case of isometric distr.
+      G = np.ones_like(view) * 0.5
+      return G
+    view = np.where(view > np.pi, 2.*np.pi - view, view)
     G = np.zeros_like(view)
     for j,v in enumerate(view):
       G[j] = fixed_quad(g, 0., np.pi/2., args=(v, arch),n=16)[0]
   else:
-    G = fixed_quad(g, 0., np.pi/2., args=(view, arch),n=16)[0] # integrate leaf angles between 0 to pi/2.
+    if arch == 's': # avoid integration, see above...
+      G = 0.5
+      return G
+    if view > np.pi: # symmetry of distribution about z axis
+      view = np.pi - view
+    G = fixed_quad(g, 0., np.pi/2., args=(view, arch),n=16)[0] 
+    # integrate g function between 0 to pi/2.
   return G
 
 def K(view, arch):
   '''The Extinction Coefficient for direct beam radiation
-  based on Myneni IV.7.
+  based on Myneni IV.7. Untested.....
   Input: view - the view or solar zenith angle in radians,
     arch - archetype, see gl function for description of each.
   Output: The Extinction coefficient (K)
@@ -133,7 +159,7 @@ def P0(view, arch, L, N, Disp='pois'):
   III.35. Simply the fraction of unit horisontal area at 
   depth L that is sunlit. The 3 distributions are as follows:
   Regular (Pos. Binomial), Random (Poisson) and Clumped 
-  (Neg. Binomial).
+  (Neg. Binomial). Untested.......
   Input: view - the view or solar zenith angle in radians,
     arch - archetype, see gl function for description of each,
     L - total LAI or depth, N - Number of layers, Disp - 
@@ -169,6 +195,7 @@ def f(view, angle, sun, arch, refl, trans):
   a leaf reflectance model such a PROSPECT. At the moment 
   this function is a placeholder for a more elaborate
   model.
+  ----------------------------------------------------------
   Input: view - the view or solar zenith angle, angle -
     leaf normal zenith angle, sun - the solar zenith angle,
     arch - archetype, see gl function for description of each,
@@ -179,7 +206,10 @@ def f(view, angle, sun, arch, refl, trans):
 
 def H(view, angle):
   '''The H function as described in Shultis 1988 (2.25) and Myneni
-  V.20 - V.22 and Knyazikhin 2004. 
+  V.20 - V.22 and Knyazikhin 2004. This was used to generate the 
+  values used in out H_LUT. H_LUT has been amended though to make 
+  it more smooth. Current code uses H_LUT and not this function.
+  -----------------------------------------------------------------
   Input: view - view or sun zenith angle, angle - leaf zenith angle.
   Output: H function value.
   '''
@@ -218,6 +248,7 @@ def H_LUT(view_sun, angle):
   surface with discontinuities removed and interpolated values
   within hyperbolic boundaries. The H_LUT.py script was used to 
   create the LUT. 
+  -----------------------------------------------------------------
   Input: view - view or sun zenith angle, angle - leaf zenith angle.
   Output: H function value.
   ''' 
@@ -238,8 +269,10 @@ def H_LUT(view_sun, angle):
   return h
 
 def Big_psi(view,sun,leaf,trans_refl):
-  '''The kernel which replaces the azimuth dependence
-  of the double integral based on the Myneni V.20.
+  '''Used in the Gamma function as the kernel which 
+  replaces the azimuth dependence of the double integral 
+  based on the Myneni V.20.
+  ------------------------------------------------------
   Input: view - the view zenith angle in radians,
     sun - the sun/illumination zenith angle,
     leaf - the leaf zenith angle in radians,
@@ -259,16 +292,11 @@ def Big_psi(view,sun,leaf,trans_refl):
   return B_psi
 
 def Gamma(view, sun, arch, refl, trans):
-  '''The Area Scattering Phase Function based on Myneni V.18
-  and Shultis (17) isotropic scattering assumption. A more 
-  elaborate function will be needed see V.18. This is the 
-  phase function of the scattering in a particular direction
-  based also on the amount of interception in the direction.
-  This function can be elaborated using the formula for the 
-  true phase angle based on spehrical trigonometry or the dot
-  product: 
-  np.arccos(np.dot(x,y)/np.sqrt(np.sum(x**2))/np.sqrt(np.sum(y**2)))
-  where x and y are the sun/view and leaf angles.
+  '''The one angle Area Scattering Phase Function based on 
+  Myneni V.18 and Shultis (17) isotropic scattering assumption. 
+  This is the phase function of the scattering in a particular 
+  direction based also on the amount of interception in the direction.
+  -------------------------------------------------------------
   Input: view - view zenith angle, sun - the solar zenith angle, 
     arch - archetype, see gl function for description, 
     refl - fraction reflected, trans - fraction transmitted.
@@ -299,8 +327,9 @@ def Gamma(view, sun, arch, refl, trans):
   return gam 
 
 def P(view, sun, arch, refl, trans):
-  '''The Normalized Scattering Phase Function as described in 
-  Myneni VII.A.13. 
+  '''The one angle Normalized Scattering Phase Function as 
+  described in Myneni VII.A.13.
+  -------------------------------------------------------------
   Input: view - view zenith angle, sun - the solar zenith angle, 
     arch - archetype, see gl function for description, 
     refl - fraction reflected, trans - fraction transmitted.
@@ -311,12 +340,17 @@ def P(view, sun, arch, refl, trans):
   return p
 
 def dot(dir1,dir2):
-  '''The dot product of 2 sherical sets of angles such
+  '''The dot product of 2 spherical sets of angles such
   as (zenith, azimuth).
   The coordinate transformation is:
   x = sin(zen)*cos(azi)
   y = sin(zen)*sin(azi)
   z = cos(zen)
+  The result of the dot product is the cosine of the spherical 
+  angle between the 2 vectors. Based on:
+  http://en.wikibooks.org/wiki/Calculus/Vectors
+  and others.
+  --------------------------------------------------------
   Input: dir1 - (zenith,azimuth), dir2 - (zenith,azimuth).
   Output: cos of the 3D angle.
   '''
@@ -334,13 +368,15 @@ def dot(dir1,dir2):
   return cos
 
 def Big_psi2(view, sun, leaf_ze):
-  '''A function that returns the psi kernel value for the 
-  portion of the integrand that is positive or negative 
-  as a tuple.
-  Based on Myneni (1988c) eq. (13).
+  '''Used in the two angle Gamma2 function as the psi kernel value
+  which is used in the integration of the leaf angles over the 
+  azimuth. It can be either positive or negative. It return a tuple
+  with a value for each.
+  Based on Myneni (1988c) eq. (12).
+  --------------------------------------------------------
   Input: view - tuple(zenith, azimuth), sun - tuple(zenith, 
   azimuth), leaf_ze - leaf zenith.
-  Output: psi kernel (positive, negative)
+  Output: psi kernel tuple(positive, negative)
   '''
   def fun_pos(leaf_az, leaf_ze, view, sun):
     leaf = (leaf_ze,leaf_az)
@@ -357,26 +393,28 @@ def Big_psi2(view, sun, leaf_ze):
     else:
       return 0.
   N = 32 # no. of leaf azimuth angles
-  ph_mu = np.array(gauss_mu[str(N)])
-  ph_wt = np.array(gauss_wt[str(N)])
+  mu_s = np.array(gauss_mu[str(N)])
+  mu_wt = np.array(gauss_wt[str(N)])
   arr_pos = []
   arr_neg = []
-  f_mu = lambda mu: np.pi * mu + np.pi
-  for ph in ph_mu:
-    arr_pos.append(fun_pos(f_mu(ph), leaf_ze, view, sun))
-    arr_neg.append(fun_neg(f_mu(ph), leaf_ze, view, sun))
-    #pdb.set_trace()
-  psi_pos = np.pi * np.sum(np.multiply(arr_pos,ph_wt))
-  psi_neg = np.pi * np.sum(np.multiply(arr_neg,ph_wt))
+  # see notes on 25/02/14. Based on gaussian quad with a
+  # change in interval.
+  f_mu = lambda mu: np.pi * mu + np.pi # changing interval
+  for mu in mu_s:
+    arr_pos.append(fun_pos(f_mu(mu), leaf_ze, view, sun))
+    arr_neg.append(fun_neg(f_mu(mu), leaf_ze, view, sun))
+  psi_pos = np.sum(np.multiply(arr_pos,mu_wt)) / 2.
+  psi_neg = np.sum(np.multiply(arr_neg,mu_wt)) / 2.
   return (psi_pos, psi_neg)
 
 def Gamma2(view, sun, arch, refl, trans):
-  '''The two-angle Areas Scattering Phase Function.
+  '''The two-angle Area Scattering Phase Function.
   Based on Myneni (1988c) eq. (12).
+  --------------------------------------------------
   Input: view - tuple(view zenith, view azimuth), 
   sun - tuple(sun zenith, sun azimuth), refl, trans,\
       arch - archetype.
-  Output: 2 angle Gamma value.
+  Output: two angle Gamma value.
   '''
   N = 16 # no. leaf zenith angles
   g_mu = np.array(gauss_mu[str(N)])
@@ -390,39 +428,41 @@ def Gamma2(view, sun, arch, refl, trans):
     return arr
   mu_l = g_mu[:N/2]
   mu_w = g_wt[:N/2]
-  g = np.sum(np.multiply(fun(mu_l,view,sun,refl,trans,arch),\
-      mu_w))
-  #print 'integration of view zenith & azimuth:\
-  #    %.2f, %.2f is:%.4f' % (view[0], view[1], g)
+  f = fun(mu_l, view, sun, refl, trans, arch)
+  g = np.sum(np.multiply(f, mu_w)) #/ np.pi / 2.
+  # the np / 2 seems to make the plots agree with Myneni fig. 11.
+  # this is by no means to be assumed that it is correct.
+  # the nose test integral still is out by pi * 100....
   return g
 
 def P2(view, sun, arch, refl, trans):
   '''The two-angle Normalized Scattering Phase Function as 
-  described in Myneni 1988(c) eq (22).
-  It requires tuples/lists/arrays for the zenith and azimuth
-  angle combinations. The gaussian weight and cos(angles) 
-  need to be passes as well.
+  described in Myneni 1988(c) eq (22). It uses the Gamma2
+  function as the basis of its calculation.
+  ---------------------------------------------------------
   Input: view - (zenith, azimuth), sun - (zenith, azimuth),
-  arch - archetype, refl, trans, g_wt, mu_l.
+  arch - archetype, refl, trans.
   Output: Normalized Scattering Phase function value.
   '''
   # a factor for each archetype due to integration error.
-  if arch == 'u':
-    fact = 1./np.pi
+  '''if arch == 'u':
+    fact = 1. #/np.pi
+    #x = (8./np.pi -4.)
+    #fact = 4. + x * np.sin(sun[0])**3 
   elif arch == 's':
-    fact = 3./4./np.pi
+    fact = 1. #3./4./np.pi
   elif arch == 'p':
-    fact = 4./3./np.pi
+    fact = 1. #4./3./np.pi
   elif arch == 'e':
-    fact = 2./3./np.pi
+    fact = 1. #2./3./np.pi
   elif arch == 'm':
-    fact = 4./5./np.pi
+    fact = 1. #4./5./np.pi
   elif arch == 'x':
-    fact = 25./18./np.pi
+    fact = 1. #25./18./np.pi
   else:
-    raise Exception('IncorrectArchetype')
+    raise Exception('IncorrectArchetype')'''
   p = 4.*Gamma2(view, sun, arch, refl, trans)/(refl+trans)/\
-      G(sun[0], arch) * fact 
+      G(sun[0], arch) #* fact 
   return p
 
 # an older version of P2 below. not good results.
@@ -454,23 +494,26 @@ def P2(view, sun, arch, refl, trans):
   return p'''
 
 def plotGamma2():
-  '''A function that plots the Gamma2 function.
+  '''A function that plots the Gamma2 function. For comparison see
+  Myneni 1989 fig.11 p 41.
   '''
   n = 16
-  refl = 0.5
-  trans = 0.5
+  refl = 1.0
+  trans = 0.0
+  albedo = refl + trans
   arch = 'u'
-  view_az = np.ones(n)*0. #1st half 0 then rest pi
+  view_az = np.ones(n)* 0. / 180. * np.pi  #1st half 0 then rest pi
   view_ze = np.arccos(gauss_mu[str(n)])
   view = []
   for a,z in zip(view_az,view_ze):
     view.append((z,a))
-  sun_az = 0.
-  sun_ze = np.pi
+  sun_az = 0. * np.pi
+  sun_ze = 180. / 180. * np.pi
   sun = (sun_ze, sun_az)
   g = []
   for v in view:
-    gam = Gamma2(v, sun, arch, refl, trans)
+    gam = Gamma2(v, sun, arch, refl, trans) / albedo
+    # 
     g.append(gam)
   fig, ax = plt.subplots(1)
   plt.plot(view_ze*180/np.pi,g,'r')
@@ -482,11 +525,13 @@ def plotGamma2():
   props = dict(boxstyle='round',facecolor='wheat',alpha=0.5)
   plt.text(.5,.5, s, bbox = props, transform=ax.transAxes,\
       horizontalalignment='center', verticalalignment='center')
+  plt.xlabel(r"$\theta$ (Exit zenith angle)")
+  plt.ylabel(r"$\Gamma$($\Omega$, $\Omega$0)/$\omega$")
+  plt.title(r"$\Gamma$ (Area Scattering Phase Function)") 
   plt.show()
 
-
 def plotBigPsi2():
-  '''A function that plots the big psi kernel.
+  '''A function that plots the big psi two angle kernel.
   '''
   n = 16
   view_az = np.ones(n)*0. #1st half 0 then rest pi
@@ -515,18 +560,21 @@ def plotBigPsi2():
   props = dict(boxstyle='round',facecolor='wheat',alpha=0.5)
   plt.text(.5,.5, s, bbox = props, transform=ax.transAxes,\
       horizontalalignment='center', verticalalignment='center')
+  plt.title(r"$\Psi$' Kernel")
+  plt.xlabel(r"$\theta$ (zenith angle)")
+  plt.ylabel(r"$\Psi$'")
   plt.show()
 
 def plotP2():
   '''A function to plot the two-angle Normalized Scattering
-  Phase Function. 
+  Phase Function. For comparison see Myneni 1988c fig.1. 
   Output: plot of P2 function
   '''
   N = 16
   g_wt = np.array(gauss_wt[str(N)])
   mu_l = np.array(gauss_mu[str(N)])
   zen = np.arccos(mu_l)
-  a = 42.7*np.pi/180. # view azimuth
+  a = 0.*np.pi/180. # view azimuth
   view = []
   for z in zen:
     view.append((z,a))
@@ -556,7 +604,7 @@ def plotgl():
   archetype.
   Output: plots of gl functions
   '''
-  types = ['p','e','s','m','x','ug','k','b']
+  types = ['p','e','s','m','x','u','k','b']
   colors = ['g','b','+r','xy','--c','p','k','y']
   views = np.linspace(0., np.pi/2, 100)
   gf = np.zeros_like(views)
@@ -591,6 +639,7 @@ def plotG():
 def plotGamma():
   '''A function that plots the Area Scattering Phase 
   function various values of leaf scattering albedo.
+  For comparison see Myneni 1989 fig.11 p41.
   Uncomment the first part of Gamma function.
   Output: plots of the Gamma function
   '''
@@ -601,7 +650,7 @@ def plotGamma():
   miny = 0.
   for trans in tr_rf:
     refl = 1. - trans
-    gam = P(view=0., sun=angles, refl=refl, trans=trans, arch='u')
+    gam = Gamma(view=0., sun=angles, refl=refl, trans=trans, arch='s')
     plt.plot(angles, gam, label=str(trans))
     maxy = max(maxy,gam.max())
     #pdb.set_trace()
@@ -615,7 +664,8 @@ def plotGamma():
 def plotH():
   '''A function that plots the H values for use in the 
   Area Scattering Phase Function, and saves the H values to 
-  disk.
+  disk. The H function plotted is not the final one as it
+  has been trandformed into a LUT. See H_LUT above.
   '''
   x = np.linspace(0., np.pi, 500) # view or sun zenith angles
   y = x.copy() # leaf normal zenith angles
@@ -634,12 +684,11 @@ def plotH():
   plt.xlabel('Zenith angle view/sun (radians)')
   plt.ylabel('Zenith angle leaf normal (radians)')
   plt.colorbar()
-  #print np.where(h==np.inf)#np.diagonal(np.fliplr(h))[20:35]
   plt.show()
 
 def plotBpsi():
   '''A function that plots the Big psi values for a selection
-  of view angles.
+  of view angles. See my notes on 09/01/14 about the plots. 
   Noticed that negative values for reflectance are correct and
   positive values for transmittance also. If you follow each case
   note that this does actually tell you alot about the influence
@@ -651,15 +700,12 @@ def plotBpsi():
   view = np.linspace(0.,np.pi,5) # view zenith angles
   trans_refl = ('r','t')
   Bpsi = np.zeros_like(xx)
-  #pdb.set_trace()
   fig, axarr = plt.subplots(2, len(view), sharex=True, sharey=True)
   for row, rt in enumerate(trans_refl): #refl or transm
     for col, v in enumerate(view): #views
       for i in range(len(x)): #sun
         for j in range(len(y)): #leaf
           Bpsi[i,j] = Big_psi(v, xx[i,j], yy[i,j], rt)
-          #print xx[i,j], yy[i,j]
-          #pdb.set_trace()
       ax = axarr[row][col]
       im = ax.pcolormesh(xx, yy, Bpsi, vmin=0., vmax=1.)
       if row == 0:
@@ -680,10 +726,3 @@ def plotBpsi():
   fig.colorbar(im, cax=cbar_ax)
   plt.show()
 
-#pdb.set_trace()
-#plotgl()
-#plotG()
-#plotGamma()
-#plotH()
-#plotBpsi()
-#plotP2()
