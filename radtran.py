@@ -22,7 +22,7 @@ import pdb
 # two_angle.py module for the case where integration is required
 # over a sphere as opposed to the over one dimension.
 # A full gaussian quadrature set was created and saved as a 
-# absicissa and weight dictionary file.
+# abscissa and weight dictionary file.
 
 gauss_f_mu = open('lgvalues-abscissa.dat','rb')
 gauss_f_wt = open('lgvalues-weights.dat','rb')
@@ -372,7 +372,7 @@ def Big_psi2(view, sun, leaf_ze):
   which is used in the integration of the leaf angles over the 
   azimuth. It can be either positive or negative. It return a tuple
   with a value for each.
-  Based on Myneni (1988c) eq. (12).
+  Based on Myneni (1988c) eq. (12 and 13).
   --------------------------------------------------------
   Input: view - tuple(zenith, azimuth), sun - tuple(zenith, 
   azimuth), leaf_ze - leaf zenith.
@@ -398,7 +398,7 @@ def Big_psi2(view, sun, leaf_ze):
   arr_pos = []
   arr_neg = []
   # see notes on 25/02/14. Based on gaussian quad with a
-  # change in interval.
+  # change in interval. Note / by 2 not by 2pi.....
   f_mu = lambda mu: np.pi * mu + np.pi # changing interval
   for mu in mu_s:
     arr_pos.append(fun_pos(f_mu(mu), leaf_ze, view, sun))
@@ -429,10 +429,10 @@ def Gamma2(view, sun, arch, refl, trans):
   mu_l = g_mu[:N/2]
   mu_w = g_wt[:N/2]
   f = fun(mu_l, view, sun, refl, trans, arch)
-  g = np.sum(np.multiply(f, mu_w)) #/ np.pi / 2.
-  # the np / 2 seems to make the plots agree with Myneni fig. 11.
-  # this is by no means to be assumed that it is correct.
-  # the nose test integral still is out by pi * 100....
+  g = np.sum(np.multiply(f, mu_w)) * np.pi / 2. #* np.pi / 2.
+  # the *2/pi seems to make the plots agree with Myneni fig. 11.
+  # the above factor is not part of the original text.
+  # the nose test integral still is out by pi / 2 * 100....
   return g
 
 def P2(view, sun, arch, refl, trans):
@@ -445,6 +445,7 @@ def P2(view, sun, arch, refl, trans):
   Output: Normalized Scattering Phase function value.
   '''
   # a factor for each archetype due to integration error.
+  # should ideally not use these...
   '''if arch == 'u':
     fact = 1. #/np.pi
     #x = (8./np.pi -4.)
@@ -462,7 +463,9 @@ def P2(view, sun, arch, refl, trans):
   else:
     raise Exception('IncorrectArchetype')'''
   p = 4.*Gamma2(view, sun, arch, refl, trans)/(refl+trans)/\
-      G(sun[0], arch) #* fact 
+      G(sun[0], arch) * 4. / np.pi
+      # the *4./pi factor is not part of the original text.
+      # it does seem to make the plots agree with Myneni 1988c fig.1. 
   return p
 
 # an older version of P2 below. not good results.

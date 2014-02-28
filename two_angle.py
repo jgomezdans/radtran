@@ -35,8 +35,8 @@ class rt_layers():
   '''
 
   def __init__(self, Tol = 1.e-6, Iter = 200, K = 20, N = 4,\
-      Lc = 4., refl = 0.175, trans = 0.175, refl_s = 1.e-7, F = np.pi,\
-      Beta=.99, sun0_zen = 180., sun0_azi = 0., arch = 's'):
+      Lc = 1., refl = 0.475, trans = 0.475, refl_s = 0.2, F = np.pi,\
+      Beta=1., sun0_zen = 180., sun0_azi = 0., arch = 'u'):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
     '''
@@ -47,6 +47,7 @@ class rt_layers():
       N = int(N)+1
       print 'N rounded up to even number:', str(N)
     self.N = N
+    # build in validation of N to counter negative fluxes.
     self.Lc = Lc
     self.refl = refl
     self.trans = trans
@@ -56,7 +57,10 @@ class rt_layers():
     self.sun0_azi = sun0_azi * np.pi / 180.
     self.sun0 = np.array([self.sun0_zen, self.sun0_azi])
     self.mu_s = np.cos(self.sun0_zen)
-    self.I0 = Beta * F / np.pi # did not include mu_s here. 
+    self.I0 = Beta * F / np.pi # did not include mu_s here which
+    # which is part of original text. mu_s skews total. more 
+    # likely to get proportion of sun at elevation.
+    self.F = F
     # it is assumed that illumination at TOC will be provided prior.
     self.Id = (1. - Beta) * F / np.pi
     self.arch = arch
@@ -64,10 +68,10 @@ class rt_layers():
     f = open('quad_dict.dat')
     quad_dict = pickle.load(f)
     f.close()
-    #pdb.set_trace()
     quad = quad_dict[str(N)]
-    self.gauss_wt = quad[:,2] / 8.# ??? #np.array(gauss_wt[str(N)])
-    self.gauss_mu = np.cos(quad[:,0]) #np.array(gauss_mu[str(N)])
+    self.gauss_wt = quad[:,2] / 8.# per octant. 
+    # see Lewis 1984 p.172 eq(4-40) 
+    self.gauss_mu = np.cos(quad[:,0])
     self.views = np.array(zip(quad[:,0],quad[:,1]))
 
     # intervals
@@ -80,11 +84,11 @@ class rt_layers():
     self.views_azi = quad[:,1]
     self.sun_up = self.views[:self.n/2]
     self.sun_down = self.views[self.n/2:]
-    self.Ird = np.sum(np.multiply(self.refl_s * 2. * \
+    self.Ird = -np.sum(np.multiply(self.refl_s * 2. * \
         np.multiply(self.gauss_mu[self.n/2:],\
         self.I_f(self.sun_down, self.Lc, self.Id)),\
         self.gauss_wt[self.n/2:]))
-    self.Ir0 = self.refl_s * self.mu_s * \
+    self.Ir0 = self.refl_s * -self.mu_s * \
         self.I_f(self.sun0, self.Lc, self.I0)
     # discrete ordinate equations
     g = G(self.views_zen,self.arch)
@@ -102,10 +106,10 @@ class rt_layers():
     self.Q3nodes = self.Jnodes.copy()
     self.Q4nodes = self.Jnodes.copy()
     self.Px = np.zeros((self.n,self.n)) # P cross-section array
-    self.Ps = np.zeros(self.n)
+    self.Ps = np.zeros(self.n) # P array for solar zenith
     # a litte progress bar for long calcs
     widgets = ['Progress: ', Percentage(), ' ', \
-      Bar(marker='0',left='[',right=']'), ' ', ETA()] #see docs for other options
+      Bar(marker='0',left='[',right=']'), ' ', ETA()] 
     maxval = np.shape(self.views)[0] * (np.shape(self.mid_ks)[0] + \
         np.shape(self.views)[0] + 1) + 1
     pbar = ProgressBar(widgets=widgets, maxval = maxval)
@@ -126,10 +130,12 @@ class rt_layers():
       for (j, v) in enumerate(self.views):
         count += 1
         pbar.update(count)
-        self.Q1nodes[i,j] = self.Q1(v,k) 
-        self.Q2nodes[i,j] = self.Q2(v,k)
-        self.Q3nodes[i,j] = self.Q3(v,k)
-        self.Q4nodes[i,j] = self.Q4(v,k)
+        # the factors to the right were found through trial and 
+        # error. They make calculations work....
+        self.Q1nodes[i,j] = self.Q1(v,k) * np.pi / 2. 
+        self.Q2nodes[i,j] = self.Q2(v,k) * np.pi / 2. * 3.
+        self.Q3nodes[i,j] = self.Q3(v,k) * np.pi / 2.
+        self.Q4nodes[i,j] = self.Q4(v,k) * np.pi / 2. * 3.
     pbar.finish()
     self.Bounds = np.zeros((2,self.n))
     os.system('play --no-show-progress --null --channels 1 \
@@ -247,12 +253,18 @@ class rt_layers():
       #print self.Inodes[0,0]
       print 'iteration no: %d completed.' % (i+1)
       if self.converge():
-        I_TOC = (self.Inodes[0,0,:self.n/2] + \
-            self.Q3nodes[0,:self.n/2] + self.Q4nodes[0,:self.n/2])\
-            / -self.mu_s
-        I_soil = (self.Inodes[self.K-1,2,self.n/2:] + \
-            self.I_f(self.sun0,self.Lc,self.I0))\
-            / -self.mu_s * (1. - self.refl_s) # needs diff term here.
+        # see Myneni 1989 p 95 for integration of canopy and 
+        # soil fluxes below. The fact was found to be linear
+        # through trial and error.
+        fact = (-1./self.mu_s - 1.) * self.Beta + 1.
+        I_TOC = self.Inodes[0,0,:self.n/2] * fact  + \
+            self.Q3nodes[0,:self.n/2] / -self.mu_s  + \
+            self.Q4nodes[0,:self.n/2]
+        I_soil = (self.Inodes[self.K-1,2,self.n/2:] * fact + \
+            self.I_f(self.sun0,self.Lc,self.I0) * -self.mu_s + \
+            self.I_f(self.views[self.n/2:],self.Lc,self.Id) * \
+            -np.cos(self.views[self.n/2:,0]))\
+            * (1. - self.refl_s) # needs diff term here.
         self.I_top_bottom = np.append(I_TOC,I_soil)
         print 'solution at iteration %d and saved in class.Inodes.'\
             % (i+1)
@@ -403,7 +415,7 @@ class rt_layers():
     Output: canopy refl, soil absorp, canopy absorp.
     '''
     c_refl = np.sum(self.I_top_bottom[:self.n/2]*\
-        self.gauss_wt[:self.n/2]) * 2.
+        self.gauss_wt[:self.n/2])
     s_abs = np.sum(self.I_top_bottom[self.n/2:]*\
         self.gauss_wt[self.n/2:]) * 2.
     c_abs = self.I0 + self.Id - c_refl - s_abs
@@ -435,32 +447,48 @@ def plot_contours(obj):
   Input: rt_layers object.
   Output: contour plot of brf.
   '''
-  #fix projection to azimuthal and cmap to same interval
-  z = np.cos(obj.views[:,0]) 
-  x = np.cos(obj.views[:,1]) * np.sqrt(1. - z**2) 
-  y = np.sin(obj.views[:,1]) * np.sqrt(1. - z**2)
-  z = obj.I_top_bottom
-  xt = x[:obj.n/2]
-  yt = y[:obj.n/2]
+  sun = ((np.pi - obj.sun0[0]) * np.cos(obj.sun0[1] + np.pi), \
+      (np.pi - obj.sun0[0]) * np.sin(obj.sun0[1] + np.pi))
+  theta = obj.views[:,0]
+  x = np.cos(obj.views[:,1]) * theta
+  y = np.sin(obj.views[:,1]) * theta
+  z = obj.I_top_bottom * -obj.mu_s
+  if np.max > 1.:
+    maxz = np.max(z)
+  else:
+    maxz = 1.
+  minz = 0. #np.min(z)
+  space = np.linspace(minz, maxz, 11)
+  x = x[:obj.n/2]
+  y = y[:obj.n/2]
   zt = z[:obj.n/2]
-  xb = x[obj.n/2:]
-  yb = y[obj.n/2:]
   zb = z[obj.n/2:]
-  xi = np.linspace(-np.pi/2.,np.pi/2.,30)
-  yi = xi.copy()
+  fig = plt.figure()
   plt.subplot(121)
-  triang = tri.Triangulation(xt, yt)
+  plt.plot(sun[0], sun[1], 'ro')
+  triang = tri.Triangulation(x, y)
   plt.gca().set_aspect('equal')
-  plt.tricontourf(triang, zt)
-  plt.colorbar(shrink=0.5, aspect=10)
+  plt.tricontourf(triang, zt, space, vmax=maxz, vmin=minz)
   plt.title('TOC BRF')
+  plt.ylabel('Y')
+  plt.xlabel('X')
   plt.subplot(122)
+  plt.plot(sun[0], sun[1], 'ro')
   plt.gca().set_aspect('equal')
-  plt.tricontourf(triang, zb)
-  plt.colorbar(shrink=0.5, aspect=10)
-  plt.title('soil BRF')
+  plt.tricontourf(triang, zb, space, vmax=maxz, vmin=minz)
+  plt.title('Soil Absorption')
+  plt.ylabel('Y')
+  plt.xlabel('X')
+  s = obj.__repr__()
+  plt.suptitle(s)
+  cbaxes = fig.add_axes([0.11,0.1,0.85,0.05])
+  plt.colorbar(orientation='horizontal', ticks=space,\
+      cax = cbaxes)
+  #plt.tight_layout()
   plt.show()
 
+# The function below have not yet been converted to the two-angle
+# case.
 
 def plot_J(obj):
   '''A function that plots the J function.

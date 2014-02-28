@@ -200,11 +200,12 @@ class rt_layers():
       #print self.Inodes[0,0]
       print 'iteration no: %d completed.' % (i+1)
       if self.converge():
+        #pdb.set_trace()
         I_TOC = (self.Inodes[0,0,:self.n] + \
             self.Q2nodes[0,:self.n]) / -self.mu_s
-        I_soil = (self.Inodes[self.K-1,2,self.n:] + \
-            self.I_f(self.sun0,self.Lc,self.I0))\
-            / -self.mu_s * (1. - self.refl_s) 
+        I_soil = (self.Inodes[self.K-1,2,self.n:] / -self.mu_s + \
+            self.I_f(self.sun0,self.Lc,self.I0) * -self.mu_s)\
+             * (1. - self.refl_s) 
         self.I_top_bottom = np.append(I_TOC,I_soil)
         print 'solution at iteration %d and saved in class.Inodes.'\
             % (i+1)
@@ -318,6 +319,7 @@ class rt_layers():
     Input: none.
     Output: canopy refl, soil absorp, canopy absorp.
     '''
+    #pdb.set_trace()
     c_refl = np.sum(self.I_top_bottom[:self.n]*\
         self.gauss_wt[:self.n])
     s_abs = np.sum(self.I_top_bottom[self.n:]*\
@@ -338,7 +340,7 @@ def plot_J(obj):
   view = sun.copy()
   Ia = np.zeros_like(view)
   index = round(np.pi - obj.sun0)*obj.N/np.pi
-  Ia[index] = self.I0
+  Ia[index] = obj.I0
   for v in view:
     j.append(obj.J(v,sun,Ia))
   plt.plot(sun,j,'--r')
