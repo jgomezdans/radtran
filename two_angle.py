@@ -3,7 +3,8 @@
 '''This will turn out to be the two-angle discrete-ordinate exact-
 kernel finite-difference implimentation of the RT equation as set
 out in Myneni 1988d. The script references the radtran.py module
-which holds all the functions required for the calculations.
+which holds all the functions required for the calculations. It 
+also requires the prospect_py.so module created using f2py.
 '''
 
 import numpy as np
@@ -18,6 +19,7 @@ from radtran import *
 import nose
 from progressbar import *
 import pdb
+import prospect_py # prospect leaf rt module interface
 
 
 class rt_layers():
@@ -35,8 +37,10 @@ class rt_layers():
   '''
 
   def __init__(self, Tol = 1.e-6, Iter = 200, K = 20, N = 4,\
-      Lc = 1., refl = 0.475, trans = 0.475, refl_s = 0.2, F = np.pi,\
-      Beta=1., sun0_zen = 180., sun0_azi = 0., arch = 'u'):
+      Lc = 1., refl_s = 0.2, F = np.pi, Beta=1., sun0_zen = 180.,\
+      sun0_azi = 0., arch = 'u', ln = 1.2, cab = 30., car = 10., \
+      cbrown = 0., cw = 0.015, cm = 0.009, lamda = 760, refl = np.nan,\
+      trans = np.nan):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
     '''
@@ -47,8 +51,26 @@ class rt_layers():
       N = int(N)+1
       print 'N rounded up to even number:', str(N)
     self.N = N
-    # build in validation of N to counter negative fluxes.
     self.Lc = Lc
+    # choose between PROSPECT or refl trans input
+    if np.isnan(refl) or np.isnan(trans):
+      self.ln = ln
+      self.cab = cab
+      self.car = car
+      self.cbrown = cbrown
+      self.cw = cw
+      self.cm = cm
+      self.lamda = lamda
+      refl, trans = prospect_py.prospect_5b(ln, cab, car, cbrown, cw,\
+          cm)[lamda-401]
+    else:
+      self.ln = np.nan
+      self.cab = np.nan
+      self.car = np.nan
+      self.cbrown = np.nan
+      self.cw = np.nan
+      self.cm = np.nan
+      self.lamda = np.nan
     self.refl = refl
     self.trans = trans
     self.refl_s = refl_s
@@ -96,6 +118,9 @@ class rt_layers():
     self.a = (1. + g*dk/2./mu)/(1. - g*dk/2./mu)
     self.b = (g*dk/mu)/(1. + g*dk/2./mu)
     self.c = (g*dk/mu)/(1. - g*dk/2./mu)
+    # build in validation of N to counter negative fluxes.
+    if any((g * dk / 2. / mu) > 1.):
+      raise Exception('NegativeFluxPossible')
     # G-function cross-sections
     self.Gx = g
     self.Gs = G(self.sun0_zen,arch)
@@ -288,14 +313,16 @@ class rt_layers():
     '''This prints out the input parameters that define the 
     instance of the class.
     '''
-    return '''Tol = %.e, Iter = %i, K = %i, N = %i, 
-    Beta = %.3f, Lc = %.3f, refl = %.3f, trans = %.3f, 
-    refl_s = %.3f, F = %.4f, sun0_zen = %.3f, 
-    sun0_azi = %.3f, arch = %s''' \
+    return \
+    '''Tol = %.e, Iter = %i, K = %i, N = %i, Beta = %.3f, Lc = %.3f, 
+    refl = %.3f, trans = %.3f, refl_s = %.3f, F = %.4f, sun0_zen = %.3f,
+    sun0_azi = %.3f, arch = %s, ln = %.2f, cab = %.2f, car = %.2f, 
+    cbrown = %.2f, cw = %.3f, cm = %.3f, lamda = %i''' \
         % (self.Tol, self.Iter, self.K, self.N, self.Beta,\
         self.Lc, self.refl, self.trans, self.refl_s, \
         self.F, self.sun0[0]*180./np.pi, self.sun0[1]*180./np.pi,\
-        self.arch)
+        self.arch, self.ln, self.cab, self.car, self.cbrown, \
+        self.cw, self.cm, self.lamda)
 
   def I_f(self, view, L, I):
     '''A function that will operate as the Beer's law exponential 
