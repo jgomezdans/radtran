@@ -1,2 +1,3 @@
 This is a Radiative Transfer Model project to describe the influence of vegetation structure on the emitted TOC SIF signal.
 .....
+To add the PROSPECT code for use in the model install f2py and run the 'compil_f2py.sh' script. 
