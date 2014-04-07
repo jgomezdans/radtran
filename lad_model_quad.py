@@ -94,6 +94,10 @@ if plot == 'y':
   plt.colorbar(label='LAI')
   plt.plot(pos.T[0], pos.T[1], 'kx', label='Tree positions')
   plt.legend()
+  text = 'Ave. LAI: %.3f' %(ave_lai)
+  plt.text(0.5, 0.5, text, horizontalalignment='left', \
+      verticalalignment='bottom', bbox=dict(facecolor='white', \
+      alpha=1.))
   plt.show()
 
 dic = {}
