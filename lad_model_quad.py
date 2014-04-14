@@ -62,11 +62,11 @@ else:
 xx = np.arange(0., extent[0], space) + space/2.
 yy = np.arange(0., extent[1], space) + space/2.
 zz = np.arange(0., extent[2], space) + space/2.
+zzt = zz[::-1] # z origin at TOC
 grid = np.zeros((len(xx), len(yy), len(zz)))
-mesh = np.meshgrid(xx, yy, zz)
 for i, x in enumerate(xx):
   for j, y in enumerate(yy):
-    for k, z in enumerate(zz):
+    for k, z in enumerate(zzt):
       for p in pos:
         x0, y0 = p
         z0 = dim[2]/2.
@@ -95,13 +95,15 @@ if plot == 'y':
   plt.plot(pos.T[0], pos.T[1], 'kx', label='Tree positions')
   plt.legend()
   text = 'Ave. LAI: %.3f' %(ave_lai)
-  plt.text(0.5, 0.5, text, horizontalalignment='left', \
+  posx = 0.05 * extent[0]
+  posy = 0.05 * extent[1]
+  plt.text(posx, posy, text, horizontalalignment='left', \
       verticalalignment='bottom', bbox=dict(facecolor='white', \
       alpha=1.))
   plt.show()
 
 dic = {}
-dic['mesh'] = mesh
+dic['mesh'] = np.array([xx, yy, zz])
 dic['grid'] = grid
  
 odfile = open(ofile, 'wb')
