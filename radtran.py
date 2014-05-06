@@ -12,6 +12,8 @@ import scipy as sc
 from scipy.integrate import fixed_quad
 from scipy.integrate import quad
 import matplotlib.pylab as plt
+from mpl_toolkits.mplot3d.axes3d import Axes3D
+from matplotlib import cm
 import warnings
 import pickle
 import leaf_angle_distributions as lad
@@ -144,15 +146,6 @@ def G(view, arch):
     G = fixed_quad(g, 0., np.pi/2., args=(view, arch),n=16)[0] 
     # integrate g function between 0 to pi/2.
   return G
-
-def K(view, arch):
-  '''The Extinction Coefficient for direct beam radiation
-  based on Myneni IV.7. Untested.....
-  Input: view - the view or solar zenith angle in radians,
-    arch - archetype, see gl function for description of each.
-  Output: The Extinction coefficient (K)
-  '''
-  return -G(view, arch)/np.cos(view)
 
 def P0(view, arch, L, N, Disp='pois'):
   '''The Gap Probability or Zero Term based on Myneni III.33-
@@ -405,6 +398,8 @@ def Big_psi2(view, sun, leaf_ze):
     arr_neg.append(fun_neg(f_mu(mu), leaf_ze, view, sun))
   psi_pos = np.sum(np.multiply(arr_pos,mu_wt)) / 2.
   psi_neg = np.sum(np.multiply(arr_neg,mu_wt)) / 2.
+  '''psi_pos = np.sum(np.multiply(arr_pos,mu_wt)) / 2. 
+  psi_neg = np.sum(np.multiply(arr_neg,mu_wt)) / 2.'''
   return (psi_pos, psi_neg)
 
 def Gamma2(view, sun, arch, refl, trans):
@@ -412,8 +407,8 @@ def Gamma2(view, sun, arch, refl, trans):
   Based on Myneni (1988c) eq. (12).
   --------------------------------------------------
   Input: view - tuple(view zenith, view azimuth), 
-  sun - tuple(sun zenith, sun azimuth), refl, trans,\
-      arch - archetype.
+    sun - tuple(sun zenith, sun azimuth), arch - archetype, 
+    refl, trans.
   Output: two angle Gamma value.
   '''
   N = 16 # no. leaf zenith angles
@@ -429,11 +424,35 @@ def Gamma2(view, sun, arch, refl, trans):
   mu_l = g_mu[:N/2]
   mu_w = g_wt[:N/2]
   f = fun(mu_l, view, sun, refl, trans, arch)
-  g = np.sum(np.multiply(f, mu_w)) * np.pi / 2. #* np.pi / 2.
+  g = np.sum(np.multiply(f, mu_w)) * np.pi / 2. #/ np.pi / 2.
+  #g = np.sum(np.multiply(f, mu_w)) / np.pi / 2. 
   # the *2/pi seems to make the plots agree with Myneni fig. 11.
   # the above factor is not part of the original text.
   # the nose test integral still is out by pi / 2 * 100....
   return g
+
+def sigma_s2(view, sun, arch, refl, trans, ul):
+  '''The differential scattering coefficient or volume scattering
+  phase function. Based on Myneni et al (1990) eq 8. This is for 
+  the 2 angle case.
+  ---------------------------------------------------------
+  Input: view - (zenith, azimuth), sun - (zenith, azimuth),
+  arch - archetype, refl, trans, ul - leaf area density.
+  Output: Volume Scattering Phase function value.
+  '''
+  s = ul / np.pi * Gamma2(view, sun, arch, refl, trans)
+  return s
+
+def sigma(view, arch, ul):
+  '''The total interaction cross section or volume extinction
+  coefficient. Based on Myneni et al (1990) eq 3.
+  ---------------------------------------------------------
+  Input: view - the view or solar zenith angle in radians, 
+  arch - archetype, ul - leaf area density.
+  Output: Total Interaction Cross Section.
+  '''
+  s = ul * G(view, arch)
+  return s
 
 def P2(view, sun, arch, refl, trans):
   '''The two-angle Normalized Scattering Phase Function as 
@@ -444,65 +463,21 @@ def P2(view, sun, arch, refl, trans):
   arch - archetype, refl, trans.
   Output: Normalized Scattering Phase function value.
   '''
-  # a factor for each archetype due to integration error.
-  # should ideally not use these...
-  '''if arch == 'u':
-    fact = 1. #/np.pi
-    #x = (8./np.pi -4.)
-    #fact = 4. + x * np.sin(sun[0])**3 
-  elif arch == 's':
-    fact = 1. #3./4./np.pi
-  elif arch == 'p':
-    fact = 1. #4./3./np.pi
-  elif arch == 'e':
-    fact = 1. #2./3./np.pi
-  elif arch == 'm':
-    fact = 1. #4./5./np.pi
-  elif arch == 'x':
-    fact = 1. #25./18./np.pi
-  else:
-    raise Exception('IncorrectArchetype')'''
   p = 4.*Gamma2(view, sun, arch, refl, trans)/(refl+trans)/\
       G(sun[0], arch) * 4. / np.pi
+  '''p = 4.*Gamma2(view, sun, arch, refl, trans)/(refl+trans)/\
+      G(sun[0], arch)'''
       # the *4./pi factor is not part of the original text.
       # it does seem to make the plots agree with Myneni 1988c fig.1. 
   return p
-
-# an older version of P2 below. not good results.
-#def P2(view, sun, arch, refl, trans, g_wt, mu_l):
-  '''The two-angle Normalized Scattering Phase Function as 
-  described in Myneni 1988(c) eq (22).
-  It requires tuples/lists/arrays for the zenith and azimuth
-  angle combinations. The gaussian weight and cos(angles) 
-  need to be passes as well.
-  Input: view - (zenith, azimuth), sun - (zenith, azimuth),
-  arch - archetype, refl, trans, g_wt, mu_l.
-  Output: Normalized Scattering Phase function value.
-  '''
-  '''mu_v, mu_s = np.cos((view[0],sun[0]))
-  ph_v, ph_s = (view[1],sun[1])
-  ph_l = np.pi*mu_l + np.pi
-  mid = len(mu_l)/2
-  zl = np.arccos(mu_l[:mid])
-  #pdb.set_trace()
-  DP1 = np.abs(mu_s*mu_l + np.sqrt(1.-mu_s**2) * \
-      np.sqrt(1.-mu_l**2) * np.cos(ph_s - ph_l))
-  DP2 = np.abs(mu_v*mu_l + np.sqrt(1.-mu_v**2) * \
-      np.sqrt(1.-mu_l**2) * np.cos(ph_v - ph_l)),
-  integ1 = np.sum(np.multiply(g_wt[:mid],gl(zl,arch)))
-  gl_h = 1.*g_wt # assuming that needs to be weighted.
-  DPs = np.multiply(DP1,DP2)
-  integ2 = np.sum(np.multiply(gl_h, DPs))
-  p = 2./G(sun[0],arch) * integ1 * integ2
-  return p'''
 
 def plotGamma2():
   '''A function that plots the Gamma2 function. For comparison see
   Myneni 1989 fig.11 p 41.
   '''
   n = 16
-  refl = 1.0
-  trans = 0.0
+  refl = 0.5
+  trans = 0.5
   albedo = refl + trans
   arch = 'u'
   view_az = np.ones(n)* 0. / 180. * np.pi  #1st half 0 then rest pi
@@ -577,14 +552,14 @@ def plotP2():
   g_wt = np.array(gauss_wt[str(N)])
   mu_l = np.array(gauss_mu[str(N)])
   zen = np.arccos(mu_l)
-  a = 0.*np.pi/180. # view azimuth
+  a = 180.*np.pi/180. # view azimuth
   view = []
   for z in zen:
     view.append((z,a))
-  sun = (180./180.*np.pi,0./180.*np.pi) # sun zenith, azimuth
-  arch = 'u'
-  refl = 0.5
-  trans = 0.5
+  sun = (110./180.*np.pi,0./180.*np.pi) # sun zenith, azimuth
+  arch = 'e'
+  refl = 0.07
+  trans = 0.03
   y = []
   for v in view:
     y.append(P2(v, sun, arch, refl, trans))
@@ -601,6 +576,44 @@ def plotP2():
   plt.ylabel(r"P($\Omega$, $\Omega$0)")
   plt.title("P (Normalized Scattering Phase Function)") 
   plt.show()
+
+def plotP2_3d():
+  '''A function that plots the normalized scattering phase function for
+  diffuse scattering. For comparison see Myneni 1991 Fig 3.
+  '''
+  N = 16
+  g_wt = np.array(gauss_wt[str(N)])
+  mu_l = np.array(gauss_mu[str(N)])
+  azi = np.linspace(0., 2.*np.pi, N)
+  zen = np.linspace(0., np.pi, N)
+  sun = (110./180.*np.pi,180./180.*np.pi) # sun zenith, azimuth
+  arch = 'e'
+  refl = 0.07
+  trans = 0.03
+  p = np.zeros((N,N)) 
+  for i, a in enumerate(azi):
+    for j, z in enumerate(zen):
+      p[j, i] = P2((z, a), sun, arch, refl, trans)
+  fig = plt.figure(figsize=plt.figaspect(0.5))
+  ax = fig.add_subplot(1, 1, 1, projection='3d')
+  a, z = np.meshgrid(azi*180./np.pi, zen*180./np.pi)
+  surf = ax.plot_surface(a, z, p, rstride=1, cstride=1, cmap=cm.coolwarm,
+      linewidth=0, antialiased=False)
+  #ax.set_zlim3d(0.62, 1.94)
+  fig.colorbar(surf, shrink=0.5, aspect=10)
+  s = '''sun zenith:%.2f, sun azimuth:%.2f, arch:%s,
+  refl:%.2f, trans:%.2f''' % \
+      (sun[0]*180/np.pi,sun[1]*180/np.pi, arch,\
+      refl, trans)
+  props = dict(boxstyle='round',facecolor='wheat',alpha=0.5)
+  '''plt.text(.5,.5, s, bbox = props, transform=ax.transAxes,\
+      horizontalalignment='center', verticalalignment='center')'''
+  ax.set_xlabel("Azimuth angle")
+  ax.set_ylabel("Zenith angle")
+  ax.set_zlabel("P")
+  plt.title("P (Normalized Scattering Phase Function)") 
+  plt.show()
+
 
 def plotgl():
   '''A function to plot the LAD distribution for each 

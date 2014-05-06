@@ -36,11 +36,11 @@ class rt_layers():
   Ouput: a rt_layers class.
   '''
 
-  def __init__(self, Tol = 1.e-6, Iter = 200, K = 20, N = 4,\
-      Lc = 1., refl_s = 0.2, F = np.pi, Beta=1., sun0_zen = 180.,\
+  def __init__(self, Tol = 1.e-6, Iter = 200, K = 4, N = 4,\
+      Lc = 1., refl_s = 0., F = np.pi, Beta=1., sun0_zen = 180.,\
       sun0_azi = 0., arch = 'u', ln = 1.2, cab = 30., car = 10., \
-      cbrown = 0., cw = 0.015, cm = 0.009, lamda = 760, refl = np.nan,\
-      trans = np.nan):
+      cbrown = 0., cw = 0.015, cm = 0.009, lamda = 760, refl = 0.5,\
+      trans = 0.5):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
     '''
@@ -317,7 +317,7 @@ class rt_layers():
     '''Tol = %.e, Iter = %i, K = %i, N = %i, Beta = %.3f, Lc = %.3f, 
     refl = %.3f, trans = %.3f, refl_s = %.3f, F = %.4f, sun0_zen = %.3f,
     sun0_azi = %.3f, arch = %s, ln = %.2f, cab = %.2f, car = %.2f, 
-    cbrown = %.2f, cw = %.3f, cm = %.3f, lamda = %i''' \
+    cbrown = %.2f, cw = %.3f, cm = %.3f, lamda = %.0f''' \
         % (self.Tol, self.Iter, self.K, self.N, self.Beta,\
         self.Lc, self.refl, self.trans, self.refl_s, \
         self.F, self.sun0[0]*180./np.pi, self.sun0[1]*180./np.pi,\
