@@ -1,0 +1,12 @@
+# A vegetation scene parameter file used as input to lad_model_quad.py.
+# The parameters are in order: space, extent, lai, pos, dim.
+# space: the cell dimension in meters.
+0.5
+# extent: the size of the scene in meters (x y z)
+1. 1. 1.
+# lai: the leaf area index 
+.5
+# pos: the positions of the trees in scene (x y)
+.5 .75
+# dim: the dimensions of the trees (x y z). x y radius and z height
+.5 .5 .75 
