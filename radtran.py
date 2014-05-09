@@ -4,7 +4,7 @@
 necessary in our implimentation of the Radiative Transfer of 
 radiation through a canopy. Classes are implimented in modules 
 such as one_angle.py and two_angle which include the remainder 
-of the funstions such as the J and Q terms.
+of the functions such as the J and Q terms.
 '''
 
 import numpy as np
@@ -315,7 +315,7 @@ def Gamma(view, sun, arch, refl, trans):
     if sun==0.:
       sun = 1.0e-10 # to remove singularity at sun==0.
     gam = fixed_quad(func, 0., np.pi/2.,\
-        args=(view,sun,arch,refl,trans),n=16)[0] 
+        args=(view,sun,arch,refl,trans),n=16)[0]
     # integrate leaf angles between 0 to pi/2.
   return gam 
 
@@ -391,15 +391,15 @@ def Big_psi2(view, sun, leaf_ze):
   arr_pos = []
   arr_neg = []
   # see notes on 25/02/14. Based on gaussian quad with a
-  # change in interval. Note / by 2 not by 2pi.....
+  # change in interval. Note / by 2 not by 2pi. See notes.
   f_mu = lambda mu: np.pi * mu + np.pi # changing interval
   for mu in mu_s:
     arr_pos.append(fun_pos(f_mu(mu), leaf_ze, view, sun))
     arr_neg.append(fun_neg(f_mu(mu), leaf_ze, view, sun))
+  '''psi_pos = np.sum(np.multiply(arr_pos,mu_wt)) / 2.
+  psi_neg = np.sum(np.multiply(arr_neg,mu_wt)) / 2.'''
   psi_pos = np.sum(np.multiply(arr_pos,mu_wt)) / 2.
   psi_neg = np.sum(np.multiply(arr_neg,mu_wt)) / 2.
-  '''psi_pos = np.sum(np.multiply(arr_pos,mu_wt)) / 2. 
-  psi_neg = np.sum(np.multiply(arr_neg,mu_wt)) / 2.'''
   return (psi_pos, psi_neg)
 
 def Gamma2(view, sun, arch, refl, trans):
@@ -424,8 +424,8 @@ def Gamma2(view, sun, arch, refl, trans):
   mu_l = g_mu[:N/2]
   mu_w = g_wt[:N/2]
   f = fun(mu_l, view, sun, refl, trans, arch)
-  g = np.sum(np.multiply(f, mu_w)) * np.pi / 2. #/ np.pi / 2.
-  #g = np.sum(np.multiply(f, mu_w)) / np.pi / 2. 
+  #g = np.sum(np.multiply(f, mu_w)) * np.pi / 2. #/ np.pi / 2.
+  g = np.sum(np.multiply(f, mu_w)) * np.pi / 2. 
   # the *2/pi seems to make the plots agree with Myneni fig. 11.
   # the above factor is not part of the original text.
   # the nose test integral still is out by pi / 2 * 100....
@@ -548,7 +548,7 @@ def plotP2():
   Phase Function. For comparison see Myneni 1988c fig.1. 
   Output: plot of P2 function
   '''
-  N = 16
+  N = 32
   g_wt = np.array(gauss_wt[str(N)])
   mu_l = np.array(gauss_mu[str(N)])
   zen = np.arccos(mu_l)
@@ -556,10 +556,10 @@ def plotP2():
   view = []
   for z in zen:
     view.append((z,a))
-  sun = (110./180.*np.pi,0./180.*np.pi) # sun zenith, azimuth
-  arch = 'e'
-  refl = 0.07
-  trans = 0.03
+  sun = (170./180.*np.pi,0./180.*np.pi) # sun zenith, azimuth
+  arch = 'u'
+  refl = 0.5
+  trans = 0.5
   y = []
   for v in view:
     y.append(P2(v, sun, arch, refl, trans))
@@ -622,7 +622,7 @@ def plotgl():
   '''
   types = ['p','e','s','m','x','u','k','b']
   colors = ['g','b','+r','xy','--c','p','k','y']
-  views = np.linspace(0., np.pi/2, 100)
+  views = np.linspace(0., np.pi/2., 100)
   gf = np.zeros_like(views)
   for i,c in zip(types,colors):
     gf = gl(views, i)

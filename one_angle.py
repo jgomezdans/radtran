@@ -202,9 +202,9 @@ class rt_layers():
       if self.converge():
         #pdb.set_trace()
         I_TOC = (self.Inodes[0,0,:self.n] + \
-            self.Q2nodes[0,:self.n]) / -self.mu_s
-        I_soil = (self.Inodes[self.K-1,2,self.n:] / -self.mu_s + \
-            self.I_f(self.sun0,self.Lc,self.I0) * -self.mu_s)\
+            self.Q2nodes[0,:self.n]) / -self.mu_s / self.I0
+        I_soil = (self.Inodes[self.K-1,2,self.n:] / -self.mu_s / self.I0 + \
+            self.I_f(self.sun0,self.Lc,self.I0))\
              * (1. - self.refl_s) 
         self.I_top_bottom = np.append(I_TOC,I_soil)
         print 'solution at iteration %d and saved in class.Inodes.'\

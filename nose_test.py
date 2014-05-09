@@ -116,6 +116,7 @@ def test_Big_psi2():
   truth = fixed_quad(integ, 0, 2.*np.pi, args=(leaf_ze, view_ze,\
       view_az, sun_ze, sun_az))[0] / np.pi / 2.
   #return (val, truth)
+  #pdb.set_trace()
   np.testing.assert_almost_equal(val, truth, decimal=3)
  
 def test_Gamma2():
@@ -123,7 +124,7 @@ def test_Gamma2():
   for integration to albedo * G(sun) over the complete sphere.
   Based on Myneni 1988c eq(2).
   '''
-  sun = (180./180. * np.pi, 45.)
+  sun = (180./180. * np.pi, 45./180. * np.pi)
   arch = 'u'
   refl = 0.5
   trans = 0.5
@@ -134,7 +135,58 @@ def test_Gamma2():
     Gam.append(rt.Gamma2(v, sun, arch, refl, trans))
   val = np.sum(np.multiply(Gam, gauss_wt)) * 16. / np.pi
   # the *16/pi is not part of the original text but makes the 
-  # code agree with the test.
+  # code agree with the test. one would think that *4*pi would
+  # be the factor to use.
+  #return (val, truth)
+  np.testing.assert_almost_equal(val, truth, decimal=2)
+
+def test_Gamma_Gamma2():
+  '''A function that tests the one and two angle Gamma functions
+  against eachother. Gamma2 is intergrated over the azimuth and 
+  divided by 2*pi.
+  '''
+  view_ze = 25. * np.pi / 180.
+  view_az = 63. * np.pi / 180.
+  view = (view_ze, view_az)
+  sun_ze = 74. * np.pi / 180.
+  sun_az = 29. * np.pi / 180.
+  sun = (sun_ze, sun_az)
+  arch = 'u'
+  refl = 0.5
+  trans = 0.5
+  g1 = rt.Gamma(view_ze, sun_ze, arch, refl, trans)
+  def integ(view_az, view_ze, sun_az, sun_ze, arch, refl, trans):
+    g = rt.Gamma2((view_ze, view_az), (sun_ze, sun_az), arch, refl,\
+        trans)
+    return g
+  g2 = quad(integ, 0., 2.*np.pi, args=(view_ze, sun_az, sun_ze, arch,\
+      refl, trans), limit=10, points=(np.pi/2.,))[0] / 2. / np.pi
+  #return (g1, g2)
+  np.testing.assert_almost_equal(g1, g2, decimal=2)
+
+def test_Psi2_psi():
+  '''A function that test the 2 angle Big_psi functions against 
+  each other. Based on Myneni 1988c (19).
+  '''
+  view_zen = 40.*np.pi/180.
+  sun_zen = 15.*np.pi/180.
+  sun_azi = 60.*np.pi/180.
+  leaf_zen = 20.*np.pi/180.
+  arch = 'u'
+  refl = .5
+  trans = .5
+  #truth = rt.Big_psi(view_zen, sun_zen, leaf_zen, 't')
+  truth = trans * np.cos(view_zen) * np.cos(sun_zen) * \
+      np.cos(leaf_zen)**2.
+  def fun(view_azi, view_zen, sun_azi, sun_zen, leaf_zen,\
+      refl, trans):
+    view = (view_zen, view_azi)
+    sun = (sun_zen, sun_azi)
+    f = rt.Big_psi2(view, sun, leaf_zen)
+    f = f[0]*trans + f[1]*refl
+    return f
+  val = quad(fun, 0., 2.*np.pi, args=(view_zen, sun_azi, \
+      sun_zen, leaf_zen, refl, trans))[0] / np.pi / 2.
   #return (val, truth)
   np.testing.assert_almost_equal(val, truth, decimal=2)
 
