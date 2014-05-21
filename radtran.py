@@ -612,6 +612,7 @@ def plotP2_3d():
   ax.set_ylabel("Zenith angle")
   ax.set_zlabel("P")
   plt.title("P (Normalized Scattering Phase Function)") 
+  print 'min: %.3f, max: %.3f' %(np.min(p), np.max(p))
   plt.show()
 
 

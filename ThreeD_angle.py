@@ -34,20 +34,24 @@ class rt_layers():
   water content, cm - dry mass, lambda - frequency in nm, 
   refl - leaf reflectance, trans - leaf transmittance, refl_s - 
   soil reflectance, F - total flux incident at TOC, Beta - fraction of 
-  direct solar illumination, sun0_zen - zenith angle of solar illumination.
+  direct solar illumination, sun0_zen - zenith angle of solar illu-
+  mination, cont - True or False for continuous canopies.
   Ouput: a rt_layers class.
   '''
 
-  def __init__(self, Tol = 1.e-6, Iter = 400, N = 4, lad_file=\
-      'scene_3D.dat', refl_s = 0., F = np.pi, Beta=1., \
+  def __init__(self, Tol = 1.e-4, Iter = 40, N = 4, lad_file=\
+      'scene_out_turbid_big.dat', refl_s = 0., F = np.pi, Beta=1., \
       sun0_zen = 180., sun0_azi = 0., arch = 'u', ln = 1.2, \
       cab = 30., car = 10., cbrown = 0., cw = 0.015, cm = 0.009, \
-      lamda = 760, refl = 0.5, trans = 0.5):
+      lamda = 760, refl = 0.175, trans = 0.175, cont=True, perc=0.95):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
     '''
+    self.cont = cont
+    self.perc = perc
     self.Tol = Tol
     self.Iter = Iter
+    self.prev_perc = np.nan
     if int(N) % 2 == 1:
       N = int(N)+1
       print 'N rounded up to even number:', str(N)
@@ -91,7 +95,8 @@ class rt_layers():
     quad_dict = pickle.load(f)
     f.close()
     quad = quad_dict[str(N)]
-    self.gauss_wt = quad[:,2] / 8.# per octant. 
+    self.n = N*(N + 2) # total directions
+    self.gauss_wt = quad[:,2] / 8.# * 8. / self.n * np.pi / 2.# per octant. 
     # see Lewis 1984 p.172 eq(4-40) and notes on 13/2/14 
     self.gauss_mu = np.cos(quad[:,0])
     self.gauss_eta = np.sqrt(1.-self.gauss_mu**2) * np.sin(quad[:,1])
@@ -118,7 +123,6 @@ class rt_layers():
     self.k = len(self.mid_xs)
     self.j = len(self.mid_ys)
     self.i = len(self.mid_zs)
-    self.n = N*(N + 2) # total directions
     # directions grouped per octant
     self.octi = np.reshape(np.arange(0,self.n), (8,-1))
     # edges grouped per octant o from, t to. see notes 4/5/14
@@ -132,8 +136,8 @@ class rt_layers():
     self.ya = np.array([self.octi[it] for it in [0,1,4,5]]).flatten()
     self.yb = np.array([self.octi[it] for it in [2,3,6,7]]).flatten()
     # node arrays and boundary arrays
-    self.views_zen = quad[:,0]
-    self.views_azi = quad[:,1]
+    self.views_zen = self.views[:,0]
+    self.views_azi = self.views[:,1]
     # splits views into octants and sun_up and sun_down
     self.sun_down = self.views[self.n/2:]
     self.sun_up = self.views[:self.n/2]
@@ -152,6 +156,7 @@ class rt_layers():
     # use Gamma/pi as function and * by ul per cell to get cross sect
     self.Gampi_x = np.zeros((self.n,self.n)) # part cross-section array
     self.Gampi_s = np.zeros(self.n) # part of array for solar zenith
+    self.Ps = self.Gampi_s.copy() # to test P theory
     # a litte progress bar for long calcs
     widgets = ['Progress: ', Percentage(), ' ', \
       Bar(marker='0',left='[',right=']'), ' ', ETA()] 
@@ -166,6 +171,7 @@ class rt_layers():
       pbar.update(count)
       self.Gampi_s[i] = Gamma2(v,self.sun0,self.arch,self.refl,\
         self.trans) / np.pi # sun view part
+      #self.Ps[i] = P2(v, self.sun0, self.arch, self.refl, self.trans)
     for (i,v1) in enumerate(self.views):
       for (j,v2) in enumerate(self.views):
         count += 1
@@ -197,32 +203,28 @@ class rt_layers():
           for l, v in enumerate(self.views):
             count += 1
             pbar.update(count)
-            self.Q1nodes[k,j,i,l] = self.Q1(v,l,pnt_lai,mid_lai) 
-            self.Q2nodes[k,j,i,l] = self.Q2(v,l,pnt_lai,mid_lai)
+            self.Q1nodes[k,j,i,l] = self.Q1(l,pnt_lai,mid_lai)\
+                * np.pi/2. 
+            self.Q2nodes[k,j,i,l] = self.Q2(l,pnt_lai,mid_lai)\
+                * np.pi/2. * 3.
             self.Q3nodes[k,j,i,l] = self.Q3(l,pnt_lai,mid_lai,\
-                tot_lai, Ir0)
+                tot_lai, Ir0) * np.pi/2.
             self.Q4nodes[k,j,i,l] = self.Q4(l,pnt_lai,mid_lai,\
-                tot_lai, Ird)
+                tot_lai, Ird) * np.pi/2. * 3.
     pbar.finish()
     self.PrevInodes = self.Inodes.copy()
     os.system('play --no-show-progress --null --channels 1 \
             synth %s sine %f' % ( 0.5, 500)) # ring the bell
-
-  def sun0_zen(self,sun0_zen):
-    '''Method used for entering solar insolation angle which
-    takes care of conversion to radians. Try not to assign 
-    angles directly to self.sun0_zen variable but use this method.
-    Input: sun0_zen - solar zenith angle in degrees.
-    Output: converts and stores value in self.sun0_zen.
-    '''
-    self.sun0_zen = sun0_zen*np.pi/180.
 
   def I_down(self, k, j, i):
     '''The discrete ordinate downward equation. The method is based on
     Myneni et al 1990 (70), and 1991 (17), and Lewis 1984 (4-53)
     as well as other neutron papers.
     '''
-    # iteration is per octant with edges affecting the octant as edo
+    # iteration is per octant with edges affecting the octants to edt
+    # from octants edo.
+    # see notes on 4/5/2014 for edge layout and cube layout.
+    # calculate the central flux
     for ind, (edo,edt) in enumerate(zip(self.edgo,self.edgt)):
       xo, yo, zo = edo # the edges from
       xt, yt, zt = edt # the edges to
@@ -235,34 +237,55 @@ class rt_layers():
           self.Q4nodes[k,j,i,vi] + self.Jnodes[k,j,i,vi] + Zf * \
           self.Inodes[k,j,i,zo,vi] + Yf * self.Inodes[k,j,i,yo,vi] + \
           Xf * self.Inodes[k,j,i,xo,vi]) /\
-          (self.Gx[vi] * self.grid[k,j,i] + Zf + Yf + Xf) 
-      self.Inodes[k,j,i,xt,vi] = 2. * self.Inodes[k,j,i,3,vi] - \
-          self.Inodes[k,j,i,xo,vi]
-      self.Inodes[k,j,i,yt,vi] = 2. * self.Inodes[k,j,i,3,vi] - \
-          self.Inodes[k,j,i,yo,vi]
-      self.Inodes[k,j,i,zt,vi] = 2. * self.Inodes[k,j,i,3,vi] - \
-          self.Inodes[k,j,i,zo,vi]
+          (self.Gx[vi] * self.grid[k,j,i] + Zf + Yf + Xf)
+    # octants and views which are involved in the transfer per x,y,z
+    doctx = np.array([0,3,4,7]) # down
+    dviewx = self.octi[doctx]
+    docty = np.array([0,1,4,5])
+    dviewy = self.octi[docty]
+    doctz = np.array([4,5,6,7])
+    dviewz = self.octi[doctz]
+    dviews = np.array([dviewx, dviewy, dviewz])
+    # sides involved in the transfer per x,y,z [from,to]
+    dside = np.array([[4,0],[5,1],[6,2]])
+    # calculate the opposite flux in the cell
+    for ds, dv in zip(dside, dviews):
+      self.Inodes[k,j,i,ds[1],dv] = 2. * self.Inodes[k,j,i,3,dv] - \
+          self.Inodes[k,j,i,ds[0],dv]
       # negative flux fixup need to revise....
-      if min(self.Inodes[k,j,i,edt,vi]) < 0.:
-        self.Inodes[k,j,i,edt,vi] = np.where(self.Inodes[k,j,i,edt,vi]\
-            < 0., 0., self.Inodes[k,j,i,edt,vi]) 
-        print 'Negative downward flux fixup performed at %d,%d,%d,%d' \
-          %(k,j,i,ind)
-      if k < self.k-1:
-        self.Inodes[k+1,j,i,edo,vi] = self.Inodes[k,j,i,edt,vi]
-      if j < self.j-1:
-        self.Inodes[k,j+1,i,edo,vi] = self.Inodes[k,j,i,edt,vi]
-      if i < self.i-1:
-        self.Inodes[k,j,i+1,edo,vi] = self.Inodes[k,j,i,edt,vi]
+      if np.min(self.Inodes[k,j,i,ds[1]]) < 0.:
+        print 'Negative downward flux fixup at %d,%d,%d,%d' \
+            %(k,j,i,ds[1])
+        #pdb.set_trace()
+        self.Inodes[k,j,i,ds[1]] = np.where(self.Inodes[k,j,i,\
+            ds[1]] < 0., 0., self.Inodes[k,j,i,ds[1]])
+    # test ...
+    if np.min(self.Inodes[k,j,i]) < 0:
+        pdb.set_trace()
+    # transfer the flux to next cell
+    if k < self.k-1:
+      self.Inodes[k+1,j,i,dside[0][0],dviewx] = self.Inodes[k,j,i,\
+          dside[0][1],dviewx]
+    if j < self.j-1:
+      self.Inodes[k,j+1,i,dside[1][0],dviewy] = self.Inodes[k,j,i,\
+          dside[1][1],dviewy]
+    if i < self.i-1:
+      self.Inodes[k,j,i+1,dside[2][0],dviewz] = self.Inodes[k,j,i,\
+          dside[2][1],dviewz]
+    # test ...
+    if np.min(self.Inodes[k,j,i]) < 0:
+        pdb.set_trace()
 
-  
   def I_up(self, k, j, i):
     '''The discrete ordinate upward equation.
     '''
-    # iteration is per octant with edges affecting the octant as edt
+    # iteration is per octant with edges affecting the octants to edt
+    # from octants edo.
+    # see notes on 4/5/2014 for edge layout and cube layout.
+    # calculate the central flux
     for ind, (edo,edt) in enumerate(zip(self.edgo,self.edgt)):
-      xo, yo, zo = edo # the edges to
-      xt, yt, zt = edt # the edges from
+      xo, yo, zo = edo # the edges from
+      xt, yt, zt = edt # the edges to
       vi = self.octi[ind] # the view indexes for this octant
       Zf = 2. * np.abs(self.gauss_mu[vi]) / self.dz
       Yf = 2. * np.abs(self.gauss_eta[vi]) / self.dy
@@ -270,85 +293,130 @@ class rt_layers():
       self.Inodes[k,j,i,3,vi] = (self.Q1nodes[k,j,i,vi] + \
           self.Q2nodes[k,j,i,vi] + self.Q3nodes[k,j,i,vi] + \
           self.Q4nodes[k,j,i,vi] + self.Jnodes[k,j,i,vi] + Zf * \
-          self.Inodes[k,j,i,zt,vi] + Yf * self.Inodes[k,j,i,yt,vi] + \
-          Xf * self.Inodes[k,j,i,xt,vi]) /\
-          (self.Gx[vi] * self.grid[k,j,i] + Zf + Yf + Xf) 
-      self.Inodes[k,j,i,xo,vi] = 2. * self.Inodes[k,j,i,3,vi] - \
-          self.Inodes[k,j,i,xt,vi]
-      self.Inodes[k,j,i,yo,vi] = 2. * self.Inodes[k,j,i,3,vi] - \
-          self.Inodes[k,j,i,yt,vi]
-      self.Inodes[k,j,i,zo,vi] = 2. * self.Inodes[k,j,i,3,vi] - \
-          self.Inodes[k,j,i,zt,vi]
+          self.Inodes[k,j,i,zo,vi] + Yf * self.Inodes[k,j,i,yo,vi] + \
+          Xf * self.Inodes[k,j,i,xo,vi]) /\
+          (self.Gx[vi] * self.grid[k,j,i] + Zf + Yf + Xf)
+    # octants and views which are involved in the transfer per x,y,z
+    doctx = np.array([1,2,5,6]) # up
+    dviewx = self.octi[doctx]
+    docty = np.array([2,3,6,7])
+    dviewy = self.octi[docty]
+    doctz = np.array([0,1,2,3])
+    dviewz = self.octi[doctz]
+    dviews = np.array([dviewx, dviewy, dviewz])
+    # sides involved in the transfer per x,y,z [from,to]
+    dside = np.array([[0,4],[1,5],[2,6]])
+    # calculate the opposite flux in the cell
+    for ds, dv in zip(dside, dviews):
+      self.Inodes[k,j,i,ds[1],dv] = 2. * self.Inodes[k,j,i,3,dv] - \
+          self.Inodes[k,j,i,ds[0],dv]
       # negative flux fixup need to revise....
-      if min(self.Inodes[k,j,i,edo,vi]) < 0.:
-        self.Inodes[k,j,i,edo,vi] = np.where(self.Inodes[k,j,i,edo,vi]\
-            < 0., 0., self.Inodes[k,j,i,edo,vi]) 
-        print 'Negative upward flux fixup performed at %d,%d,%d,%d' \
-          %(k,j,i,ind)
-      if k != 0:
-        self.Inodes[k-1,j,i,edt,vi] = self.Inodes[k,j,i,edo,vi]
-      if j != 0:
-        self.Inodes[k,j-1,i,edt,vi] = self.Inodes[k,j,i,edo,vi]
-      if i != 0:
-        self.Inodes[k,j,i-1,edt,vi] = self.Inodes[k,j,i,edo,vi]
-    
+      if np.min(self.Inodes[k,j,i,ds[1]]) < 0.:
+        self.Inodes[k,j,i,ds[1]] = np.where(self.Inodes[k,j,i,\
+            ds[1]] < 0., 0., self.Inodes[k,j,i,ds[1]])
+        print 'Negative upward flux fixup at %d,%d,%d,%d' \
+            %(k,j,i,ds[1])
+    # test ...
+    if np.min(self.Inodes[k,j,i]) < 0:
+        pdb.set_trace()
+    # transfer the flux to next cell
+    if k != 0:
+      self.Inodes[k-1,j,i,dside[0][0],dviewx] = self.Inodes[k,j,i,\
+          dside[0][1],dviewx]
+    if j != 0:
+      self.Inodes[k,j-1,i,dside[1][0],dviewy] = self.Inodes[k,j,i,\
+          dside[1][1],dviewy]
+    if i != 0:
+      self.Inodes[k,j,i-1,dside[2][0],dviewz] = self.Inodes[k,j,i,\
+          dside[2][1],dviewz]
+    # test ...
+    if np.min(self.Inodes[k,j,i]) < 0:
+        pdb.set_trace()
+  
   def reverse(self):
     '''Reverses the transmissivity at soil boundary.
     '''
-    for k, x in enumerate(self.mid_xs):
-      for j, y in enumerate(self.mid_ys):
-        Ir = np.multiply(-np.cos(self.views[self.n/2:,0]),\
+    for k in np.arange(0,self.k):
+      for j in np.arange(0,self.j):
+        Ir = np.multiply(-self.gauss_mu[self.n/2:],\
             self.Inodes[k,j,self.i-1,2,self.n/2:])
-        self.Inodes[k,j,self.i-1,2,:self.n/2] = self.refl_s * \
+        self.Inodes[k,j,self.i-1,2,:self.n/2] = 2. * self.refl_s * \
             np.sum(np.multiply(Ir,self.gauss_wt[self.n/2:]))
-        # transfer fluxes for continuous scenes
 
   def converge(self):
     '''Check for convergence and returns true if converges.
     '''
-    misclose_I = np.abs((self.Inodes - self.PrevInodes)/\
+    '''misclose_I = np.abs((self.Inodes - self.PrevInodes)/\
         self.Inodes)
-    max_I = np.nanmax(misclose_I)
+    '''
+    misclose_I = np.abs(self.Inodes - self.PrevInodes)
+    #pdb.set_trace()
+    count = (misclose_I < self.Tol).sum()
+    total = self.k * self.j * self.i * 6 * self.n
+    '''index = np.where(np.isfinite(misclose_I))
+    max_I = np.nanmax(misclose_I[index])
     print 'max misclosure : %.g' % (max_I)
     if max_I  <= self.Tol:
       return True
     else:
       return False
-  
+    '''
+    ratio = np.float(count) / np.float(total)
+    improve = ratio - self.prev_perc
+    print '%.3f %% under %.g tolerance' % (ratio*100., self.Tol)
+    if (ratio > self.perc) or (improve < 0.):
+      return True
+    else:
+      self.prev_perc = ratio
+      return False
+
   def solve(self):
     '''The solver. Run this as a method of the instance of the
     rt_layers class to solve the RT equations. You first need
     to create an instance of the class though using:
-    eg. test = rt_layers() # see rt_layers ? for more options.
+    eg. test = rt_layers() # see '? rt_layers' for more options.
     then run test.solve().
     Input: none.
     Output: the fluxes at discrete ordinates and nodes.
     '''
     for h in range(self.Iter):
-      # forward sweep into the slab
-      for i, mz in enumerate(self.mid_zs):
-        for j, my in enumerate(self.mid_ys):
-          for k, mx in enumerate(self.mid_xs):
+      # forward sweep into the cube
+      for i in np.arange(0,self.i):
+        for j in np.arange(0,self.j):
+          for k in np.arange(0,self.k):
             self.I_down(k,j,i)
-      # reverse the diffuse? transmissivity and transfer fluxes
-      self.reverse()
-      # backsweep out of the slab
-      for i, mz in enumerate(self.mid_zs[::-1]):
-        for j, my in enumerate(self.mid_ys[::-1]):
-          for k, mx in enumerate(self.mid_xs[::-1]):
-            self.I_up(k,j,i)
-      # transfer fluxes from one end to the other of cube
-      '''self.Inodes[0,:,:,4,self.xa] = self.Inodes[self.k-1,:,:,0,self.xa]
-      self.Inodes[self.k-1,:,:,0,self.xb] = self.Inodes[0,:,:,4,self.xb]
-      self.Inodes[:,0,:,5,self.ya] = self.Inodes[:,self.j-1,:,1,self.ya]
-      self.Inodes[:,self.j-1,:,1,self.yb] = self.Inodes[:,0,:,5,self.yb]'''
       # check for negativity in flux
       if np.min(self.Inodes) < 0.:
-        # print self.Inodes
+        pdb.set_trace()
         print 'negative values in flux'
-            # check for convergence
+      # reverse the diffuse transmissivity and transfer fluxes
+      self.reverse()
+      # backsweep out of the cube
+      for i in np.arange(self.i-1,-1,-1):
+        for j in np.arange(self.j-1,-1,-1):
+          for k in np.arange(self.k-1,-1,-1):
+            self.I_up(k,j,i)
+      # check for negativity in flux
+      if np.min(self.Inodes) < 0.:
+        pdb.set_trace()
+        print 'negative values in flux'
+      # transfer fluxes from one end to the other of cube
+      if self.cont == True:
+        self.Inodes[0,:,:,4,self.xa] = self.Inodes[self.k-1,:,:,0,\
+            self.xa].copy()
+        self.Inodes[self.k-1,:,:,0,self.xb] = self.Inodes[0,:,:,4,\
+            self.xb].copy()
+        self.Inodes[:,0,:,5,self.ya] = self.Inodes[:,self.j-1,:,1,\
+            self.ya].copy()
+        self.Inodes[:,self.j-1,:,1,self.yb] = self.Inodes[:,0,:,5,\
+            self.yb].copy()
+      # check for negativity in flux
+      if np.min(self.Inodes) < 0.:
+        pdb.set_trace()
+        print 'negative values in flux'
       print 'iteration no: %d completed.' % (h+1)
-      if self.converge():
+      # check for convergence
+      if self.converge() or h == self.Iter-1:
         # see Myneni 1989 p 95 for integration of canopy and 
         # soil fluxes below. The fact was found to be linear
         # through trial and error.
@@ -366,12 +434,16 @@ class rt_layers():
                 self.tot_lai_grid[k,j],self.Id) * 
                 -np.cos(self.views[self.n/2:,0]))\
                 * (1. - self.refl_s) # needs diff term here.
+        self.I_top_bottom = np.zeros((self.n))
+        self.I_top_bottom[:self.n/2] = np.average(self.I_TOC,axis=(0,1))
+        self.I_top_bottom[self.n/2:] = np.average(self.I_soil,\
+            axis=(0,1))
         print 'solution at iteration %d and saved in class.Inodes.'\
             % (i+1)
         os.system('play --no-show-progress --null --channels 1 \
             synth %s sine %f' % ( 0.5, 500)) # ring the bell
         print 'TOC (up) and soil (down) fluxe array:'
-        return (self.I_TOC, self.I_soil)
+        return self.I_top_bottom
         break
       else:
         # swap boundary for new flux
@@ -382,7 +454,7 @@ class rt_layers():
           for j, my in enumerate(self.mid_ys):
             for k, mx in enumerate(self.mid_xs):
               for l, v in enumerate(self.views):
-                self.Jnodes[k,j,i,l] = self.J(v,l,k,j,i)
+                self.Jnodes[k,j,i,l] = self.J(l,k,j,i)
         # acceleration can be implimented here...
         continue
 
@@ -399,12 +471,12 @@ class rt_layers():
     '''Tol = %.e, Iter = %i, lad_file = %s, N = %i, Beta = %.3f, 
     refl = %.3f, trans = %.3f, refl_s = %.3f, F = %.4f, sun0_zen = %.3f,
     sun0_azi = %.3f, arch = %s, ln = %.2f, cab = %.2f, car = %.2f, 
-    cbrown = %.2f, cw = %.3f, cm = %.3f, lamda = %.0f''' \
+    cbrown = %.2f, cw = %.3f, cm = %.3f, lamda = %.0f, cont = %r''' \
         % (self.Tol, self.Iter, self.lad_file, self.N, self.Beta,\
         self.refl, self.trans, self.refl_s, \
         self.F, self.sun0[0]*180./np.pi, self.sun0[1]*180./np.pi,\
         self.arch, self.ln, self.cab, self.car, self.cbrown, \
-        self.cw, self.cm, self.lamda)
+        self.cw, self.cm, self.lamda, self.cont)
 
   def I_f(self, view, L, I):
     '''A function that will operate as the Beer's law exponential 
@@ -426,7 +498,7 @@ class rt_layers():
     i =  I * np.exp(G(angle,self.arch)*L/mu)
     return i
 
-  def J(self, view, l, k, j, i):
+  def J(self, l, k, j, i):
     '''The J or Distributed Source Term according to Myneni 1990
     (63). This gives the multiple scattering as opposed to First 
     Collision term Q.
@@ -439,10 +511,10 @@ class rt_layers():
         self.Gampi_x[l])
     # element-by-element multiplication
     # numerical integration by gaussian qaudrature
-    j = np.sum(integ*self.gauss_wt)
+    j = np.sum(np.multiply(integ,self.gauss_wt))
     return j
 
-  def Q1(self, view, l, pnt_lai, mid_lai):
+  def Q1(self, l, pnt_lai, mid_lai):
     '''The Q1 First First Collision Source Term as defined in Myneni
     1988d (16) and 1990 (26). This is the downwelling direct part of 
     the Q term. 
@@ -451,11 +523,16 @@ class rt_layers():
     TOC.
     Ouput: The Q1 term for view direction.
     '''
+    #pdb.set_trace()
+    '''I = self.I_f(self.sun0, mid_lai, self.I0)
+    q = self.albedo / 4. * self.Ps[l] * self.Gs/\
+        self.Gx[l] * I * self.Gx[l] * pnt_lai / np.pi
+    '''
     I_exp = self.I_f(self.sun0, mid_lai, self.I0)
-    q = pnt_lai * self.Gampi_s[l] * I_exp
+    q = pnt_lai * self.Gampi_s[l] * I_exp #* np.pi / G(view[0], self.arch) / mid_lai
     return q
 
-  def Q2(self, view, l, pnt_lai, mid_lai):
+  def Q2(self, l, pnt_lai, mid_lai):
     '''The Q2 Second First Collision Source Term as defined in
     Myneni 1988d (17) and 1990 (26). This is the downwelling diffuse
     part of the Q term.
@@ -544,7 +621,7 @@ def plot_contours(obj):
   theta = obj.views[:,0]
   x = np.cos(obj.views[:,1]) * theta
   y = np.sin(obj.views[:,1]) * theta
-  z = obj.I_top_bottom * -obj.mu_s
+  z = obj.I_top_bottom #* -obj.mu_s
   if np.max > 1.:
     maxz = np.max(z)
   else:
@@ -579,118 +656,4 @@ def plot_contours(obj):
   #plt.tight_layout()
   plt.show()
 
-# The function below have not yet been converted to the two-angle
-# case.
-
-def plot_J(obj):
-  '''A function that plots the J function.
-  It requires the the number of intervals
-  of the sun angle from 0. to pi, the archetype and reflection
-  and transmission values and the Intensity or Flux.
-  Input: obj - instance of rt_layers object.
-  Output: plots the J function values.
-  '''
-  sun = np.linspace(np.pi,0.,obj.N)
-  j = []
-  view = sun.copy()
-  Ia = np.zeros_like(view)
-  index = round(np.pi - obj.sun0_zen)*obj.N/np.pi
-  Ia[index] = self.I0
-  for v in view:
-    j.append(obj.J(v,sun,Ia))
-  plt.plot(sun,j,'--r')
-  plt.show()
-
-def plot_Q1(obj,L):
-  '''A function that plots the Q1 function.
-  It requires the single sun angle (not list) for uncollided
-  Downwelling illumination, the number of view angles to 
-  evaluate between 0 and pi, the archetype, the reflectance,
-  transmittance, LAI, and Flux at the TOC.
-  Input: obj - instance of rt_layers object, L - LAI.
-  Output: Q1 term
-  '''
-  view = np.linspace(0.,np.pi,obj.N)
-  q = []
-  for v in view:
-    q.append(obj.Q1(v, L))
-  plt.plot(view,q,'--r')
-  plt.show()
-
-def plot_Q3(obj, L):
-  '''A function that plots the Q3 function. To be noted is that
-  this is the upwelling component of the first collision term Q.
-  The graph would then portray greater scattering in the lower
-  half towards view angles pi/2 to pi for the typical scenarios.
-  Input: obj - instance of rt_layer object, L.
-  Ouput: Q3 term.
-  '''
-  view = np.linspace(0.,np.pi,obj.N)
-  q = []
-  for v in view:
-    q.append(obj.Q3(v, L))
-  plt.plot(view,q,'--r')
-  plt.show()
-
-def plot_Q(obj,L):
-  '''A function that plots the Q function as sum of Q1 and Q3.
-
-  '''
-  view = np.linspace(0.,np.pi,obj.N)
-  q = []
-  for v in view:
-    q.append(obj.Q1(v, L)+\
-          obj.Q3(v, L))
-    plt.plot(view,q,'--r')
-    plt.show()
-
-def plot_brf(obj):
-  '''A function to plot the upward and downward scattering at
-  TOC and soil. 
-  Input: rt_layer instance object.
-  Output: plot of scattering.
-  '''
-  views = np.cos(obj.views)
-  brf = obj.I_top_bottom
-  fig, ax = plt.subplots(1)
-  plt.plot(views,brf,'ro',label='BRF')
-  plt.title("BRF at top and bottom node")
-  s = obj.__repr__()
-  props = dict(boxstyle='round',facecolor='wheat',alpha=0.5)
-  plt.text(0.5,0.5,s,horizontalalignment='center',\
-      verticalalignment='center',transform=ax.transAxes,\
-      bbox=props)
-  plt.xlabel(r"$\mu$ (cosine of exit zenith)")
-  plt.ylabel(r'Refl.($\mu$+) and Trans.($\mu$-)')
-  plt.show()
-
-def plot_prof(obj):
-  '''Function that plots a vertical profile of scattering from
-  TOC to BOC.
-  Input: rt_layer instance object.
-  Output: plot of scattering.
-  '''
-  I = obj.Inodes[:,1,:] \
-      / -obj.mu_s
-  y = np.linspace(obj.Lc, 0., obj.K+1)
-  x = obj.views*180./np.pi
-  xm = np.array([])
-  for i in np.arange(0,len(x)-1):
-    nx = x[i] + (x[i+1]-x[i])/2.
-    xm = np.append(xm,nx)
-  xm = np.insert(xm,0,0.)
-  xm = np.append(xm,180.)
-  xx, yy = np.meshgrid(xm, y)
-  plt.pcolormesh(xx,yy,I)
-  plt.colorbar()
-  plt.title('Canopy Fluxes')
-  plt.xlabel('Exit Zenith Angle')
-  plt.ylabel('Cumulative LAI (0=soil)')
-  plt.arrow(135.,3.5,0.,-3.,head_width=5.,head_length=.2,\
-      fc='k',ec='k')
-  plt.text(140.,2.5,'Downwelling Flux',rotation=90)
-  plt.arrow(45.,.5,0.,3.,head_width=5.,head_length=.2,\
-      fc='k',ec='k')
-  plt.text(35.,2.5,'Upwelling Flux',rotation=270)
-  plt.show()
 
