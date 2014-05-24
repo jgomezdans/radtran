@@ -39,8 +39,8 @@ class rt_layers():
   def __init__(self, Tol = 1.e-6, Iter = 200, K = 10, N = 4,\
       Lc = 1., refl_s = 0., F = np.pi, Beta=1., sun0_zen = 180.,\
       sun0_azi = 0., arch = 'u', ln = 1.2, cab = 30., car = 10., \
-      cbrown = 0., cw = 0.015, cm = 0.009, lamda = 760, refl = 0.175,\
-      trans = 0.175):
+      cbrown = 0., cw = 0.015, cm = 0.009, lamda = 760, refl = 0.375,\
+      trans = 0.375):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
     '''

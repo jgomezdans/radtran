@@ -43,7 +43,7 @@ class rt_layers():
       'scene_out_turbid_big.dat', refl_s = 0., F = np.pi, Beta=1., \
       sun0_zen = 180., sun0_azi = 0., arch = 'u', ln = 1.2, \
       cab = 30., car = 10., cbrown = 0., cw = 0.015, cm = 0.009, \
-      lamda = 760, refl = 0.175, trans = 0.175, cont=True, perc=0.95):
+      lamda = 760, refl = 0.375, trans = 0.375, cont=True, perc=0.95):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
     '''
@@ -130,6 +130,10 @@ class rt_layers():
         [0,5,6],[0,1,6],[4,1,6]])
     self.edgt = np.array([[0,1,6],[4,1,6],[4,5,6],[0,5,6],[0,1,2],\
         [4,1,2],[4,5,2],[0,5,2]])
+    # decision table on direction of flux transfer
+    self.decide = np.array([[True,True,False],[False,True,False],\
+        [False,False,False],[True,False,False],[True,True,True],\
+        [False,True,True],[False,False,True],[True,False,True]])
     # end cube flux transfer octants and views. see notes 4/5/14
     self.xa = np.array([self.octi[it] for it in [0,3,4,7]]).flatten()
     self.xb = np.array([self.octi[it] for it in [1,2,5,6]]).flatten()
@@ -204,7 +208,7 @@ class rt_layers():
             count += 1
             pbar.update(count)
             self.Q1nodes[k,j,i,l] = self.Q1(l,pnt_lai,mid_lai)\
-                * np.pi/2. 
+                * np.pi/2. * np.pi * 4. / 3. 
             self.Q2nodes[k,j,i,l] = self.Q2(l,pnt_lai,mid_lai)\
                 * np.pi/2. * 3.
             self.Q3nodes[k,j,i,l] = self.Q3(l,pnt_lai,mid_lai,\
@@ -216,123 +220,61 @@ class rt_layers():
     os.system('play --no-show-progress --null --channels 1 \
             synth %s sine %f' % ( 0.5, 500)) # ring the bell
 
-  def I_down(self, k, j, i):
-    '''The discrete ordinate downward equation. The method is based on
-    Myneni et al 1990 (70), and 1991 (17), and Lewis 1984 (4-53)
-    as well as other neutron papers.
+  def I_march(self, k, j, i, oc):
+    '''The discrete ordinate upward and downward equation. The method
+    is based on Myneni et al 1990 (70), and 1991 (17), and Lewis 1984
+    (4-53) as well as other neutron papers. See notes on 4/5/14 and
+    23/5/14.
+    Input: k, j, i - the cell index, oc - the octant to be calculated.
     '''
     # iteration is per octant with edges affecting the octants to edt
     # from octants edo.
     # see notes on 4/5/2014 for edge layout and cube layout.
     # calculate the central flux
-    for ind, (edo,edt) in enumerate(zip(self.edgo,self.edgt)):
-      xo, yo, zo = edo # the edges from
-      xt, yt, zt = edt # the edges to
-      vi = self.octi[ind] # the view indexes for this octant
-      Zf = 2. * np.abs(self.gauss_mu[vi]) / self.dz
-      Yf = 2. * np.abs(self.gauss_eta[vi]) / self.dy
-      Xf = 2. * np.abs(self.gauss_xi[vi]) / self.dx
-      self.Inodes[k,j,i,3,vi] = (self.Q1nodes[k,j,i,vi] + \
-          self.Q2nodes[k,j,i,vi] + self.Q3nodes[k,j,i,vi] + \
-          self.Q4nodes[k,j,i,vi] + self.Jnodes[k,j,i,vi] + Zf * \
-          self.Inodes[k,j,i,zo,vi] + Yf * self.Inodes[k,j,i,yo,vi] + \
-          Xf * self.Inodes[k,j,i,xo,vi]) /\
-          (self.Gx[vi] * self.grid[k,j,i] + Zf + Yf + Xf)
-    # octants and views which are involved in the transfer per x,y,z
-    doctx = np.array([0,3,4,7]) # down
-    dviewx = self.octi[doctx]
-    docty = np.array([0,1,4,5])
-    dviewy = self.octi[docty]
-    doctz = np.array([4,5,6,7])
-    dviewz = self.octi[doctz]
-    dviews = np.array([dviewx, dviewy, dviewz])
-    # sides involved in the transfer per x,y,z [from,to]
-    dside = np.array([[4,0],[5,1],[6,2]])
+    edo = self.edgo[oc]
+    edt = self.edgt[oc]
+    xo, yo, zo = edo # the edges from
+    xt, yt, zt = edt # the edges to
+    vi = self.octi[oc] # the view indexes for this octant
+    Zf = 2. * np.abs(self.gauss_mu[vi]) / self.dz
+    Yf = 2. * np.abs(self.gauss_eta[vi]) / self.dy
+    Xf = 2. * np.abs(self.gauss_xi[vi]) / self.dx
+    self.Inodes[k,j,i,3,vi] = (self.Q1nodes[k,j,i,vi] + \
+        self.Q2nodes[k,j,i,vi] + self.Q3nodes[k,j,i,vi] + \
+        self.Q4nodes[k,j,i,vi] + self.Jnodes[k,j,i,vi] + Zf * \
+        self.Inodes[k,j,i,zo,vi] + Yf * self.Inodes[k,j,i,yo,vi] + \
+        Xf * self.Inodes[k,j,i,xo,vi]) /\
+        (self.Gx[vi] * self.grid[k,j,i] + Zf + Yf + Xf)
     # calculate the opposite flux in the cell
-    for ds, dv in zip(dside, dviews):
-      self.Inodes[k,j,i,ds[1],dv] = 2. * self.Inodes[k,j,i,3,dv] - \
-          self.Inodes[k,j,i,ds[0],dv]
-      # negative flux fixup need to revise....
-      if np.min(self.Inodes[k,j,i,ds[1]]) < 0.:
-        print 'Negative downward flux fixup at %d,%d,%d,%d' \
-            %(k,j,i,ds[1])
-        #pdb.set_trace()
-        self.Inodes[k,j,i,ds[1]] = np.where(self.Inodes[k,j,i,\
-            ds[1]] < 0., 0., self.Inodes[k,j,i,ds[1]])
-    # test ...
-    if np.min(self.Inodes[k,j,i]) < 0:
-        pdb.set_trace()
-    # transfer the flux to next cell
-    if k < self.k-1:
-      self.Inodes[k+1,j,i,dside[0][0],dviewx] = self.Inodes[k,j,i,\
-          dside[0][1],dviewx]
-    if j < self.j-1:
-      self.Inodes[k,j+1,i,dside[1][0],dviewy] = self.Inodes[k,j,i,\
-          dside[1][1],dviewy]
-    if i < self.i-1:
-      self.Inodes[k,j,i+1,dside[2][0],dviewz] = self.Inodes[k,j,i,\
-          dside[2][1],dviewz]
-    # test ...
-    if np.min(self.Inodes[k,j,i]) < 0:
-        pdb.set_trace()
+    for (fr, to) in zip(edo, edt):
+      temp = 2. * self.Inodes[k,j,i,3,vi] - self.Inodes[k,j,i,fr,vi]
+      # negative flux fixup which simply sets it to zero.
+      if np.min(temp) < 0.:
+        print 'Negative downward flux fixup at %d,%d,%d,%d,%d' \
+            %(k,j,i,to,vi)
+        temp = np.where(self.Inodes[k,j,i,to,vi] < 0., 0., \
+            self.Inodes[k,j,i,to,vi])
+      self.Inodes[k,j,i,to,vi] = temp 
+    # transfer of flux to next cell
+    if self.decide[oc][0]:
+      if k < self.k-1:
+        self.Inodes[k+1,j,i,4,vi] = self.Inodes[k,j,i,0,vi]
+    else:
+      if k > 0:
+        self.Inodes[k-1,j,i,0,vi] = self.Inodes[k,j,i,4,vi]
+    if self.decide[oc][1]:
+      if j < self.j-1:
+        self.Inodes[k,j+1,i,5,vi] = self.Inodes[k,j,i,1,vi]
+    else:
+      if j > 0:
+        self.Inodes[k,j-1,i,1,vi] = self.Inodes[k,j,i,5,vi]
+    if self.decide[oc][2]:
+      if i < self.i-1:
+        self.Inodes[k,j,i+1,6,vi] = self.Inodes[k,j,i,2,vi]
+    else:
+      if i > 0:
+        self.Inodes[k,j,i-1,2,vi] = self.Inodes[k,j,i,6,vi]
 
-  def I_up(self, k, j, i):
-    '''The discrete ordinate upward equation.
-    '''
-    # iteration is per octant with edges affecting the octants to edt
-    # from octants edo.
-    # see notes on 4/5/2014 for edge layout and cube layout.
-    # calculate the central flux
-    for ind, (edo,edt) in enumerate(zip(self.edgo,self.edgt)):
-      xo, yo, zo = edo # the edges from
-      xt, yt, zt = edt # the edges to
-      vi = self.octi[ind] # the view indexes for this octant
-      Zf = 2. * np.abs(self.gauss_mu[vi]) / self.dz
-      Yf = 2. * np.abs(self.gauss_eta[vi]) / self.dy
-      Xf = 2. * np.abs(self.gauss_xi[vi]) / self.dx
-      self.Inodes[k,j,i,3,vi] = (self.Q1nodes[k,j,i,vi] + \
-          self.Q2nodes[k,j,i,vi] + self.Q3nodes[k,j,i,vi] + \
-          self.Q4nodes[k,j,i,vi] + self.Jnodes[k,j,i,vi] + Zf * \
-          self.Inodes[k,j,i,zo,vi] + Yf * self.Inodes[k,j,i,yo,vi] + \
-          Xf * self.Inodes[k,j,i,xo,vi]) /\
-          (self.Gx[vi] * self.grid[k,j,i] + Zf + Yf + Xf)
-    # octants and views which are involved in the transfer per x,y,z
-    doctx = np.array([1,2,5,6]) # up
-    dviewx = self.octi[doctx]
-    docty = np.array([2,3,6,7])
-    dviewy = self.octi[docty]
-    doctz = np.array([0,1,2,3])
-    dviewz = self.octi[doctz]
-    dviews = np.array([dviewx, dviewy, dviewz])
-    # sides involved in the transfer per x,y,z [from,to]
-    dside = np.array([[0,4],[1,5],[2,6]])
-    # calculate the opposite flux in the cell
-    for ds, dv in zip(dside, dviews):
-      self.Inodes[k,j,i,ds[1],dv] = 2. * self.Inodes[k,j,i,3,dv] - \
-          self.Inodes[k,j,i,ds[0],dv]
-      # negative flux fixup need to revise....
-      if np.min(self.Inodes[k,j,i,ds[1]]) < 0.:
-        self.Inodes[k,j,i,ds[1]] = np.where(self.Inodes[k,j,i,\
-            ds[1]] < 0., 0., self.Inodes[k,j,i,ds[1]])
-        print 'Negative upward flux fixup at %d,%d,%d,%d' \
-            %(k,j,i,ds[1])
-    # test ...
-    if np.min(self.Inodes[k,j,i]) < 0:
-        pdb.set_trace()
-    # transfer the flux to next cell
-    if k != 0:
-      self.Inodes[k-1,j,i,dside[0][0],dviewx] = self.Inodes[k,j,i,\
-          dside[0][1],dviewx]
-    if j != 0:
-      self.Inodes[k,j-1,i,dside[1][0],dviewy] = self.Inodes[k,j,i,\
-          dside[1][1],dviewy]
-    if i != 0:
-      self.Inodes[k,j,i-1,dside[2][0],dviewz] = self.Inodes[k,j,i,\
-          dside[2][1],dviewz]
-    # test ...
-    if np.min(self.Inodes[k,j,i]) < 0:
-        pdb.set_trace()
-  
   def reverse(self):
     '''Reverses the transmissivity at soil boundary.
     '''
@@ -350,9 +292,8 @@ class rt_layers():
         self.Inodes)
     '''
     misclose_I = np.abs(self.Inodes - self.PrevInodes)
-    #pdb.set_trace()
     count = (misclose_I < self.Tol).sum()
-    total = self.k * self.j * self.i * 6 * self.n
+    total = self.k * self.j * self.i * 7 * self.n
     '''index = np.where(np.isfinite(misclose_I))
     max_I = np.nanmax(misclose_I[index])
     print 'max misclosure : %.g' % (max_I)
@@ -384,36 +325,28 @@ class rt_layers():
       for i in np.arange(0,self.i):
         for j in np.arange(0,self.j):
           for k in np.arange(0,self.k):
-            self.I_down(k,j,i)
-      # check for negativity in flux
-      if np.min(self.Inodes) < 0.:
-        pdb.set_trace()
-        print 'negative values in flux'
+            self.I_march(k,j,i,4)
+          for k in np.arange(self.k-1,-1,-1):
+            self.I_march(k,j,i,5)
+        for j in np.arange(self.j-1,-1,-1):
+          for k in np.arange(self.k-1,-1,-1):
+            self.I_march(k,j,i,6)
+          for k in np.arange(0,self.k):
+            self.I_march(k,j,i,7)
       # reverse the diffuse transmissivity and transfer fluxes
       self.reverse()
       # backsweep out of the cube
       for i in np.arange(self.i-1,-1,-1):
+        for j in np.arange(0,self.j):
+          for k in np.arange(0,self.k):
+            self.I_march(k,j,i,0)
+          for k in np.arange(self.k-1,-1,-1):
+            self.I_march(k,j,i,1)
         for j in np.arange(self.j-1,-1,-1):
           for k in np.arange(self.k-1,-1,-1):
-            self.I_up(k,j,i)
-      # check for negativity in flux
-      if np.min(self.Inodes) < 0.:
-        pdb.set_trace()
-        print 'negative values in flux'
-      # transfer fluxes from one end to the other of cube
-      if self.cont == True:
-        self.Inodes[0,:,:,4,self.xa] = self.Inodes[self.k-1,:,:,0,\
-            self.xa].copy()
-        self.Inodes[self.k-1,:,:,0,self.xb] = self.Inodes[0,:,:,4,\
-            self.xb].copy()
-        self.Inodes[:,0,:,5,self.ya] = self.Inodes[:,self.j-1,:,1,\
-            self.ya].copy()
-        self.Inodes[:,self.j-1,:,1,self.yb] = self.Inodes[:,0,:,5,\
-            self.yb].copy()
-      # check for negativity in flux
-      if np.min(self.Inodes) < 0.:
-        pdb.set_trace()
-        print 'negative values in flux'
+            self.I_march(k,j,i,2)
+          for k in np.arange(0,self.k):
+            self.I_march(k,j,i,3)
       print 'iteration no: %d completed.' % (h+1)
       # check for convergence
       if self.converge() or h == self.Iter-1:
@@ -427,13 +360,13 @@ class rt_layers():
           for j, ym in enumerate(self.mid_ys):
             self.I_TOC[k,j] = self.Inodes[k,j,0,6,:self.n/2] * fact  + \
                 self.Q3nodes[k,j,0,:self.n/2] / -self.mu_s  + \
-                self.Q4nodes[k,j,0,:self.n/2]
+                self.Q4nodes[k,j,0,:self.n/2] * np.pi * 4. / 3.
             self.I_soil[k,j] = (self.Inodes[k,j,self.i-1,2,self.n/2:]\
                 * fact + self.I_f(self.sun0,self.tot_lai_grid[k,j], \
                 self.I0) * -self.mu_s + self.I_f(self.views[self.n/2:],\
                 self.tot_lai_grid[k,j],self.Id) * 
                 -np.cos(self.views[self.n/2:,0]))\
-                * (1. - self.refl_s) # needs diff term here.
+                * (1. - self.refl_s) * np.pi / 3. # needs diff term here.
         self.I_top_bottom = np.zeros((self.n))
         self.I_top_bottom[:self.n/2] = np.average(self.I_TOC,axis=(0,1))
         self.I_top_bottom[self.n/2:] = np.average(self.I_soil,\
@@ -456,6 +389,16 @@ class rt_layers():
               for l, v in enumerate(self.views):
                 self.Jnodes[k,j,i,l] = self.J(l,k,j,i)
         # acceleration can be implimented here...
+        # transfer fluxes from one end to the other of cube
+        if self.cont == True:
+          self.Inodes[0,:,:,4,self.xa] = self.Inodes[self.k-1,:,:,0,\
+              self.xa].copy()
+          self.Inodes[self.k-1,:,:,0,self.xb] = self.Inodes[0,:,:,4,\
+              self.xb].copy()
+          self.Inodes[:,0,:,5,self.ya] = self.Inodes[:,self.j-1,:,1,\
+              self.ya].copy()
+          self.Inodes[:,self.j-1,:,1,self.yb] = self.Inodes[:,0,:,5,\
+              self.yb].copy()
         continue
 
   def __del__(self):
@@ -523,7 +466,6 @@ class rt_layers():
     TOC.
     Ouput: The Q1 term for view direction.
     '''
-    #pdb.set_trace()
     '''I = self.I_f(self.sun0, mid_lai, self.I0)
     q = self.albedo / 4. * self.Ps[l] * self.Gs/\
         self.Gx[l] * I * self.Gx[l] * pnt_lai / np.pi
@@ -584,7 +526,7 @@ class rt_layers():
     Output: canopy refl, soil absorp, canopy absorp.
     '''
     c_refl = np.sum(self.I_top_bottom[:self.n/2]*\
-        self.gauss_wt[:self.n/2])
+        self.gauss_wt[:self.n/2]) * 2.
     s_abs = np.sum(self.I_top_bottom[self.n/2:]*\
         self.gauss_wt[self.n/2:]) * 2.
     c_abs = self.I0 + self.Id - c_refl - s_abs
