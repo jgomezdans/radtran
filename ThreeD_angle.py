@@ -39,11 +39,11 @@ class rt_layers():
   Ouput: a rt_layers class.
   '''
 
-  def __init__(self, Tol = 1.e-4, Iter = 40, N = 4, lad_file=\
-      'scene_out_turbid_big.dat', refl_s = 0., F = np.pi, Beta=1., \
-      sun0_zen = 180., sun0_azi = 0., arch = 'u', ln = 1.2, \
+  def __init__(self, Tol = 1.e-3, Iter = 40, N = 4, lad_file=\
+      'scene_out_turbid_big_lai4.dat', refl_s = 0.1, F = np.pi, Beta=1., \
+      sun0_zen = 180., sun0_azi = 0., arch = 's', ln = 1.2, \
       cab = 30., car = 10., cbrown = 0., cw = 0.015, cm = 0.009, \
-      lamda = 760, refl = 0.375, trans = 0.375, cont=True, perc=0.95):
+      lamda = 760, refl = 0.175, trans = 0.175, cont=True, perc=0.95):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
     '''
@@ -250,10 +250,9 @@ class rt_layers():
       temp = 2. * self.Inodes[k,j,i,3,vi] - self.Inodes[k,j,i,fr,vi]
       # negative flux fixup which simply sets it to zero.
       if np.min(temp) < 0.:
-        print 'Negative downward flux fixup at %d,%d,%d,%d,%d' \
-            %(k,j,i,to,vi)
-        temp = np.where(self.Inodes[k,j,i,to,vi] < 0., 0., \
-            self.Inodes[k,j,i,to,vi])
+        print 'Negative flux fixup at %d,%d,%d,%d' \
+            %(k,j,i,to)
+        temp = np.where(temp < 0., 0., temp)
       self.Inodes[k,j,i,to,vi] = temp 
     # transfer of flux to next cell
     if self.decide[oc][0]:
@@ -526,7 +525,7 @@ class rt_layers():
     Output: canopy refl, soil absorp, canopy absorp.
     '''
     c_refl = np.sum(self.I_top_bottom[:self.n/2]*\
-        self.gauss_wt[:self.n/2]) * 2.
+        self.gauss_wt[:self.n/2])
     s_abs = np.sum(self.I_top_bottom[self.n/2:]*\
         self.gauss_wt[self.n/2:]) * 2.
     c_abs = self.I0 + self.Id - c_refl - s_abs
