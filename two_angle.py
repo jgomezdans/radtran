@@ -36,11 +36,11 @@ class rt_layers():
   Ouput: a rt_layers class.
   '''
 
-  def __init__(self, Tol = 1.e-6, Iter = 200, K = 10, N = 4,\
-      Lc = 4., refl_s = 0.1, F = np.pi, Beta=1., sun0_zen = 180.,\
-      sun0_azi = 0., arch = 's', ln = 1.2, cab = 30., car = 10., \
-      cbrown = 0., cw = 0.015, cm = 0.009, lamda = 760, refl = 0.175,\
-      trans = 0.175):
+  def __init__(self, Tol = 1.e-6, Iter = 200, K = 10, N = 6,\
+      Lc = 2.0, refl_s = 0.0, F = np.pi, Beta=.0, sun0_zen = 180.,\
+      sun0_azi = 0.0, arch = 'u', ln = 1.2, cab = 30., car = 10., \
+      cbrown = 0., cw = 0.015, cm = 0.009, lamda = 760, refl = 0.2,\
+      trans = 0.2):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
     '''
@@ -157,10 +157,10 @@ class rt_layers():
         pbar.update(count)
         # the factors to the right were found through trial and 
         # error. They make calculations work....
-        self.Q1nodes[i,j] = self.Q1(j,k) * np.pi / 2. 
-        self.Q2nodes[i,j] = self.Q2(j,k) * np.pi / 2. * 3.
-        self.Q3nodes[i,j] = self.Q3(j,k) * np.pi / 2.
-        self.Q4nodes[i,j] = self.Q4(j,k) * np.pi / 2. * 3.
+        self.Q1nodes[i,j] = self.Q1(j,k)# * np.pi / 2. 
+        self.Q2nodes[i,j] = self.Q2(j,k)# * np.pi / 2. * 3.
+        self.Q3nodes[i,j] = self.Q3(j,k)# * np.pi / 2.
+        self.Q4nodes[i,j] = self.Q4(j,k)# * np.pi / 2. * 3.
     pbar.finish()
     self.Bounds = np.zeros((2,self.n))
     os.system('play --no-show-progress --null --channels 1 \
@@ -257,7 +257,7 @@ class rt_layers():
         # see Myneni 1989 p 95 for integration of canopy and 
         # soil fluxes below. The fact was found to be linear
         # through trial and error.
-        fact = (-1./self.mu_s - 1.) * self.Beta + 1.
+        fact = 1.#(-1./self.mu_s - 1.) * self.Beta + 1.
         I_TOC = self.Inodes[0,0,:self.n/2] * fact  + \
             self.Q3nodes[0,:self.n/2] / -self.mu_s  + \
             self.Q4nodes[0,:self.n/2]
@@ -437,10 +437,11 @@ def plot_sphere(obj):
   plt.colorbar(scat, shrink=0.5, aspect=10)
   plt.show()
 
-def plot_contours(obj):
+def plot_contours(obj, top_bottom=True):
   '''A function that plots the BRF as an azimuthal projection
   with contours over the TOC and soil.
-  Input: rt_layers object.
+  Input: rt_layers object, top_bottom - True if only TOC plot, False
+  if both TOC and soil.
   Output: contour plot of brf.
   '''
   sun = ((np.pi - obj.sun0[0]) * np.cos(obj.sun0[1] + np.pi), \
@@ -449,10 +450,13 @@ def plot_contours(obj):
   x = np.cos(obj.views[:,1]) * theta
   y = np.sin(obj.views[:,1]) * theta
   z = obj.I_top_bottom # * -obj.mu_s
-  if np.max > 1.:
-    maxz = np.max(z)
+  if top_bottom == True:
+    if np.max > 1.:
+      maxz = np.max(z)
+    else:
+      maxz = 1.
   else:
-    maxz = 1.
+    maxz = np.max(z[:obj.n/2])
   minz = 0. #np.min(z)
   space = np.linspace(minz, maxz, 11)
   x = x[:obj.n/2]
@@ -460,7 +464,8 @@ def plot_contours(obj):
   zt = z[:obj.n/2]
   zb = z[obj.n/2:]
   fig = plt.figure()
-  plt.subplot(121)
+  if top_bottom == True:
+    plt.subplot(121)
   plt.plot(sun[0], sun[1], 'ro')
   triang = tri.Triangulation(x, y)
   plt.gca().set_aspect('equal')
@@ -468,18 +473,24 @@ def plot_contours(obj):
   plt.title('TOC BRF')
   plt.ylabel('Y')
   plt.xlabel('X')
-  plt.subplot(122)
-  plt.plot(sun[0], sun[1], 'ro')
-  plt.gca().set_aspect('equal')
-  plt.tricontourf(triang, zb, space, vmax=maxz, vmin=minz)
-  plt.title('Soil Absorption')
-  plt.ylabel('Y')
-  plt.xlabel('X')
+  if top_bottom == True:
+    plt.subplot(122)
+    plt.plot(sun[0], sun[1], 'ro')
+    plt.gca().set_aspect('equal')
+    plt.tricontourf(triang, zb, space, vmax=maxz, vmin=minz)
+    plt.title('Soil Absorption')
+    plt.ylabel('Y')
+    plt.xlabel('X')
   s = obj.__repr__()
-  plt.suptitle(s)
-  cbaxes = fig.add_axes([0.11,0.1,0.85,0.05])
-  plt.colorbar(orientation='horizontal', ticks=space,\
-      cax = cbaxes)
-  #plt.tight_layout()
+  if top_bottom == True:
+    cbaxes = fig.add_axes([0.11,0.1,0.85,0.05])
+    plt.suptitle(s,x=0.5,y=0.93)
+    plt.colorbar(orientation='horizontal', ticks=space,\
+      cax = cbaxes, format='%.3f')
+  else:
+    plt.suptitle(s,x=0.5,y=0.13)
+    plt.colorbar(orientation='horizontal', ticks=space,\
+        format='%.3f')
+    #plt.tight_layout()
   plt.show()
 

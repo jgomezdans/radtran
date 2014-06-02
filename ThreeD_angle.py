@@ -39,11 +39,11 @@ class rt_layers():
   Ouput: a rt_layers class.
   '''
 
-  def __init__(self, Tol = 1.e-3, Iter = 40, N = 4, lad_file=\
-      'scene_out_turbid_big_lai4.dat', refl_s = 0.1, F = np.pi, Beta=1., \
+  def __init__(self, Tol = 1.e-2, Iter = 40, N = 6, lad_file=\
+      'scene_out_turbid_big.dat', refl_s = 1.0, F = np.pi, Beta=1., \
       sun0_zen = 180., sun0_azi = 0., arch = 's', ln = 1.2, \
       cab = 30., car = 10., cbrown = 0., cw = 0.015, cm = 0.009, \
-      lamda = 760, refl = 0.175, trans = 0.175, cont=True, perc=0.95):
+      lamda = 760, refl = 0.5, trans = 0.5, cont=True, perc=0.95):
     '''The constructor for the rt_layers class.
     See the class documentation for details of inputs.
     '''
@@ -351,21 +351,21 @@ class rt_layers():
       if self.converge() or h == self.Iter-1:
         # see Myneni 1989 p 95 for integration of canopy and 
         # soil fluxes below. The fact was found to be linear
-        # through trial and error.
-        fact = (-1./self.mu_s - 1.) * self.Beta + 1.
+        # through trial and error. note addit fact of *4/pi
+        fact = 2 + self.mu_s #(-1./self.mu_s - 1.) * self.Beta + 1.  
         self.I_TOC = np.zeros((self.k,self.j,self.n/2))
         self.I_soil = self.I_TOC.copy()
         for k, xm in enumerate(self.mid_xs):
           for j, ym in enumerate(self.mid_ys):
-            self.I_TOC[k,j] = self.Inodes[k,j,0,6,:self.n/2] * fact  + \
+            self.I_TOC[k,j] =(self.Inodes[k,j,0,6,:self.n/2] * fact  + \
                 self.Q3nodes[k,j,0,:self.n/2] / -self.mu_s  + \
-                self.Q4nodes[k,j,0,:self.n/2] * np.pi * 4. / 3.
+                self.Q4nodes[k,j,0,:self.n/2]) #* np.pi)# * 4./3.
             self.I_soil[k,j] = (self.Inodes[k,j,self.i-1,2,self.n/2:]\
                 * fact + self.I_f(self.sun0,self.tot_lai_grid[k,j], \
                 self.I0) * -self.mu_s + self.I_f(self.views[self.n/2:],\
                 self.tot_lai_grid[k,j],self.Id) * 
                 -np.cos(self.views[self.n/2:,0]))\
-                * (1. - self.refl_s) * np.pi / 3. # needs diff term here.
+                * (1. - self.refl_s)# *np.pi / 3. #needs diff term here.
         self.I_top_bottom = np.zeros((self.n))
         self.I_top_bottom[:self.n/2] = np.average(self.I_TOC,axis=(0,1))
         self.I_top_bottom[self.n/2:] = np.average(self.I_soil,\
@@ -375,6 +375,7 @@ class rt_layers():
         os.system('play --no-show-progress --null --channels 1 \
             synth %s sine %f' % ( 0.5, 500)) # ring the bell
         print 'TOC (up) and soil (down) fluxe array:'
+        #self.I_top_bottom *= 4./np.pi # factor corr.
         return self.I_top_bottom
         break
       else:
@@ -551,10 +552,11 @@ def plot_sphere(obj):
   plt.colorbar(scat, shrink=0.5, aspect=10)
   plt.show()
 
-def plot_contours(obj):
+def plot_contours(obj, top_bottom=True):
   '''A function that plots the BRF as an azimuthal projection
   with contours over the TOC and soil.
-  Input: rt_layers object.
+  Input: rt_layers object, top_bottom - True if only TOC plot, False
+  if both TOC and soil.
   Output: contour plot of brf.
   '''
   sun = ((np.pi - obj.sun0[0]) * np.cos(obj.sun0[1] + np.pi), \
@@ -563,10 +565,13 @@ def plot_contours(obj):
   x = np.cos(obj.views[:,1]) * theta
   y = np.sin(obj.views[:,1]) * theta
   z = obj.I_top_bottom #* -obj.mu_s
-  if np.max > 1.:
-    maxz = np.max(z)
+  if top_bottom == True:
+    if np.max > 1.:
+      maxz = np.max(z)
+    else:
+      maxz = 1.
   else:
-    maxz = 1.
+    maxz = np.max(z[:obj.n/2])
   minz = 0. #np.min(z)
   space = np.linspace(minz, maxz, 11)
   x = x[:obj.n/2]
@@ -574,7 +579,8 @@ def plot_contours(obj):
   zt = z[:obj.n/2]
   zb = z[obj.n/2:]
   fig = plt.figure()
-  plt.subplot(121)
+  if top_bottom == True:
+    plt.subplot(121)
   plt.plot(sun[0], sun[1], 'ro')
   triang = tri.Triangulation(x, y)
   plt.gca().set_aspect('equal')
@@ -582,19 +588,25 @@ def plot_contours(obj):
   plt.title('TOC BRF')
   plt.ylabel('Y')
   plt.xlabel('X')
-  plt.subplot(122)
-  plt.plot(sun[0], sun[1], 'ro')
-  plt.gca().set_aspect('equal')
-  plt.tricontourf(triang, zb, space, vmax=maxz, vmin=minz)
-  plt.title('Soil Absorption')
-  plt.ylabel('Y')
-  plt.xlabel('X')
+  if top_bottom == True:
+    plt.subplot(122)
+    plt.plot(sun[0], sun[1], 'ro')
+    plt.gca().set_aspect('equal')
+    plt.tricontourf(triang, zb, space, vmax=maxz, vmin=minz)
+    plt.title('Soil Absorption')
+    plt.ylabel('Y')
+    plt.xlabel('X')
   s = obj.__repr__()
-  plt.suptitle(s)
-  cbaxes = fig.add_axes([0.11,0.1,0.85,0.05])
-  plt.colorbar(orientation='horizontal', ticks=space,\
-      cax = cbaxes)
-  #plt.tight_layout()
+  if top_bottom == True:
+    cbaxes = fig.add_axes([0.11,0.1,0.85,0.05])
+    plt.suptitle(s,x=0.5,y=0.93)
+    plt.colorbar(orientation='horizontal', ticks=space,\
+        cax = cbaxes, format='%.3f')
+  else:
+    plt.suptitle(s,x=0.5,y=0.13)
+    plt.colorbar(orientation='horizontal', ticks=space,\
+        format='%.3f')
+   #plt.tight_layout()
   plt.show()
 
 
